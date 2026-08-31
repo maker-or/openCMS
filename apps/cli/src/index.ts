@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { access, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { spawn } from "node:child_process";
+import { createInterface } from "node:readline/promises";
 import process from "node:process";
 
 import { createSdk, type Project } from "../../../packages/sdk/src/index";
@@ -45,6 +46,15 @@ function sdk(config: CliConfig, projectId?: string) {
     projectId,
     getToken: () => tokenFor(config),
   });
+}
+
+async function ask(question: string) {
+  const terminal = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return (await terminal.question(question)).trim();
+  } finally {
+    terminal.close();
+  }
 }
 
 function fileExists(path: string) {
@@ -204,7 +214,7 @@ async function pullTemplate(destination: string) {
 async function createProject() {
   const config = await readConfig();
   await ensureToken(config);
-  const name = prompt("Project name:")?.trim();
+  const name = await ask("Project name: ");
   if (!name) throw new Error("A project name is required.");
   const client = sdk(await readConfig());
   const project = await client.projects.create({ name });
