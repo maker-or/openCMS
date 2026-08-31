@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import process from "node:process";
 
-import { createSdk, type Project } from "../../../packages/sdk/src/index";
+import { createSdk, OpenCmsApiError, type Project } from "../../../packages/sdk/src/index";
 
 const dashboardUrl = process.env.OPENCMS_DASHBOARD_URL ?? "http://localhost:3000";
 const apiUrl = process.env.OPENCMS_API_URL ?? "http://localhost:3000";
@@ -140,6 +140,13 @@ async function ensureToken(config: CliConfig) {
   return loggedInToken;
 }
 
+async function reauthenticate(config: CliConfig) {
+  console.log("Your OpenCMS session has expired. Opening browser login…");
+  const loggedInToken = await browserLogin();
+  await writeConfig({ ...config, token: loggedInToken, apiUrl: config.apiUrl ?? apiUrl });
+  return loggedInToken;
+}
+
 async function login() {
   const config = await readConfig();
   if (process.env.OPENCMS_CLERK_TOKEN) {
@@ -216,8 +223,18 @@ async function createProject() {
   await ensureToken(config);
   const name = await ask("Project name: ");
   if (!name) throw new Error("A project name is required.");
-  const client = sdk(await readConfig());
-  const project = await client.projects.create({ name });
+  let currentConfig = await readConfig();
+  let client = sdk(currentConfig);
+  let project: Project;
+  try {
+    project = await client.projects.create({ name });
+  } catch (error) {
+    if (!(error instanceof OpenCmsApiError) || error.status !== 401) throw error;
+    await reauthenticate(currentConfig);
+    currentConfig = await readConfig();
+    client = sdk(currentConfig);
+    project = await client.projects.create({ name });
+  }
   const destination = resolve(process.cwd(), slugify(project.name));
   await pullTemplate(destination);
   const baseUrl = process.env.OPENCMS_API_URL ?? config.apiUrl ?? apiUrl;
