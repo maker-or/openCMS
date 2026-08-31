@@ -10,11 +10,11 @@ The developer-first CLI for creating and connecting Next.js applications to Open
 ## Usage
 
 ```bash
-npx opencms create
-npx opencms login
-npx opencms logout
-npx opencms dev
-npx opencms deploy
+npx @maker-or/opencms create
+npx @maker-or/opencms login
+npx @maker-or/opencms logout
+npx @maker-or/opencms dev
+npx @maker-or/opencms deploy
 ```
 
 `opencms create` authenticates you, creates an OpenCMS project, pulls the Next.js template, writes the project configuration, and installs dependencies.

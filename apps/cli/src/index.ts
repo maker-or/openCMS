@@ -218,7 +218,7 @@ async function createProject() {
   console.log(`\nCreated ${project.name}.`);
   console.log(`Project ID: ${project.id}`);
   console.log(`Dashboard: ${dashboardUrl.replace(/\/$/, "")}/dashboard/${project.id}`);
-  console.log(`\nNext steps:\n  cd ${slugify(project.name)}\n  npx opencms dev\n  npx opencms deploy`);
+  console.log(`\nNext steps:\n  cd ${slugify(project.name)}\n  npx @maker-or/opencms dev\n  npx @maker-or/opencms deploy`);
 }
 
 async function runDev() {
@@ -254,7 +254,7 @@ async function deploy() {
 }
 
 function printHelp() {
-  console.log("OpenCMS CLI\n\nUsage: npx opencms <command>\n\nCommands:\n  create   Create a project and connected Next.js app\n  login    Authenticate this machine\n  logout   Remove local credentials\n  dev      Run the local Next.js app against development\n  deploy   Promote development content to production");
+  console.log("OpenCMS CLI\n\nUsage: npx @maker-or/opencms <command>\n\nCommands:\n  create   Create a project and connected Next.js app\n  login    Authenticate this machine\n  logout   Remove local credentials\n  dev      Run the local Next.js app against development\n  deploy   Promote development content to production");
 }
 
 const command = process.argv[2];

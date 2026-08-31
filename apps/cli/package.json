@@ -1,5 +1,5 @@
 {
-  "name": "opencms",
+  "name": "@maker-or/opencms",
   "version": "0.1.0",
   "description": "The developer-first CLI for OpenCMS",
   "type": "module",
@@ -9,6 +9,9 @@
     "directory": "apps/cli"
   },
   "homepage": "https://github.com/maker-or/openCMS",
+  "publishConfig": {
+    "access": "public"
+  },
   "keywords": [
     "opencms",
     "cms",
