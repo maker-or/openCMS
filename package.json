@@ -1,0 +1,21 @@
+{
+  "name": "opencms",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bun run --cwd apps/web dev",
+    "dev:cli": "bun run --cwd apps/cli dev",
+    "build": "bun run --cwd apps/web build",
+    "db:generate": "bun run --cwd packages/db db:generate",
+    "db:migrate": "bun run --cwd packages/db db:migrate",
+    "db:push": "bun run --cwd packages/db db:push",
+    "typecheck": "bun run --cwd packages/db typecheck && bun run --cwd packages/sdk typecheck && bun run --cwd apps/web typecheck && bun run --cwd apps/cli typecheck",
+    "lint": "bun run --cwd apps/web lint"
+  },
+  "engines": {
+    "bun": ">=1.4.0"
+  }
+}
