@@ -9,7 +9,13 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import process from "node:process";
 
-import { createSdk, OpenCmsApiError, type Project } from "../../../packages/sdk/src/index";
+import {
+  createSdk,
+  defaultSchema,
+  OpenCmsApiError,
+  type OpenCmsSchema,
+  type Project,
+} from "../../../packages/sdk/src/index";
 
 const dashboardUrl = process.env.OPENCMS_DASHBOARD_URL ?? "http://localhost:3000";
 const apiUrl = process.env.OPENCMS_API_URL ?? "http://localhost:3000";
@@ -189,6 +195,10 @@ async function ensureCmsDirectory(destination: string, project: Project, baseUrl
   if (!(await fileExists(configFile))) {
     await writeFile(configFile, `export const opencms = {\n  projectId: process.env.NEXT_PUBLIC_OPENCMS_PROJECT_ID ?? "${project.id}",\n  apiUrl: process.env.OPENCMS_API_URL ?? "${baseUrl}",\n  environment: process.env.OPENCMS_ENVIRONMENT ?? "development",\n} as const;\n`, "utf8");
   }
+  const schemaFile = join(cmsDirectory, "schema.json");
+  if (!(await fileExists(schemaFile))) {
+    await writeFile(schemaFile, `${JSON.stringify(defaultSchema, null, 2)}\n`, "utf8");
+  }
 }
 
 async function packageManager(destination: string) {
@@ -251,9 +261,26 @@ async function createProject() {
 async function runDev() {
   const config = await readConfig();
   await ensureToken(config);
+  await syncLocalSchema(await projectIdFromEnv(), await readConfig());
   const manager = await packageManager(process.cwd());
   const command = manager[0] === "npm" ? ["npm", "run", "dev"] : manager[0] === "pnpm" ? ["pnpm", "dev"] : manager[0] === "yarn" ? ["yarn", "dev"] : ["bun", "run", "dev"];
   process.exit(await runCommand(command[0], command.slice(1), { cwd: process.cwd(), env: { ...process.env, OPENCMS_ENVIRONMENT: "development" }, inherit: true }));
+}
+
+async function syncLocalSchema(projectId: string | undefined, config: CliConfig) {
+  if (!projectId) return;
+  const schemaPath = join(process.cwd(), "cms", "schema.json");
+  if (!(await fileExists(schemaPath))) return;
+
+  let schema: OpenCmsSchema;
+  try {
+    schema = JSON.parse(await readFile(schemaPath, "utf8")) as OpenCmsSchema;
+  } catch {
+    throw new Error("cms/schema.json is not valid JSON.");
+  }
+
+  console.log("Syncing the OpenCMS schema to development…");
+  await sdk(config, projectId).schema.update(schema);
 }
 
 function projectIdFromEnv() {
@@ -270,6 +297,7 @@ async function deploy() {
   await ensureToken(config);
   const projectId = (await projectIdFromEnv()) ?? config.projectId;
   if (!projectId) throw new Error("No OpenCMS project is configured in this directory.");
+  await syncLocalSchema(projectId, await readConfig());
   const deployment = await sdk(await readConfig()).deploy(projectId);
   console.log(`Deployed ${deployment.sourceEnvironment} content to ${deployment.targetEnvironment}.`);
   if (process.env.VERCEL_TOKEN) {

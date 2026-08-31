@@ -42,10 +42,17 @@ import {
 } from "@/components/ui/sidebar";
 import { useShape } from "@/lib/shape-context";
 import { SurfaceProvider } from "@/lib/surface-context";
-import { createSdk, type Document, type Environment } from "@opencms/sdk";
+import {
+  createSdk,
+  defaultSchema,
+  type ContentBlock,
+  type Document,
+  type Environment,
+  type OpenCmsSchema,
+} from "@opencms/sdk";
 import { ThemeToggle } from "../../theme-provider";
 
-function ProjectFrame({ children }: { children: React.ReactNode }) {
+export function ProjectFrame({ children }: { children: React.ReactNode }) {
   return (
     <SidebarProvider defaultOpen persist={false} shortcut={null} width="220px">
       <div className="dashboard-surface flex min-h-screen w-full bg-surface-1">
@@ -100,7 +107,7 @@ function ProjectSidebar() {
   );
 }
 
-function SignInRequired() {
+export function SignInRequired() {
   return (
     <main className="dashboard-surface min-h-screen bg-surface-1 px-6">
       <div className="flex justify-end py-6"><ThemeToggle /></div>
@@ -116,7 +123,7 @@ function SignInRequired() {
   );
 }
 
-function EnvironmentTabs({
+export function EnvironmentTabs({
   environment,
   onChange,
 }: {
@@ -134,10 +141,12 @@ function EnvironmentTabs({
 }
 
 function PageList({
+  projectId,
   pages,
   environment,
   isLoading,
 }: {
+  projectId: string;
   pages: Document[];
   environment: Environment;
   isLoading: boolean;
@@ -172,10 +181,17 @@ function PageList({
       ) : (
         <CardGroup border="outlined" className="overflow-hidden bg-surface-2 shadow-surface-2">
           {pages.map((page) => (
-            <Card key={page.id} className="bg-transparent">
+            <Card
+              key={page.id}
+              href={`/dashboard/${projectId}/pages/${page.id}`}
+              label={`Edit ${page.title}`}
+              className="bg-transparent"
+            >
               <CardHeader>
                 <CardTitle className="text-lg">{page.title}</CardTitle>
-                <CardDescription className="mt-1 font-mono text-xs">/{page.slug}</CardDescription>
+                <CardDescription className="mt-1 font-mono text-xs">
+                  /{page.slug} · {page.status} · {page.content?.blocks?.length ?? 0} blocks
+                </CardDescription>
               </CardHeader>
             </Card>
           ))}
@@ -185,27 +201,209 @@ function PageList({
   );
 }
 
+export function createBlock(type: string, schema?: OpenCmsSchema): ContentBlock {
+  const id = typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${type}-${Date.now()}`;
+  const fields = schema?.blocks[type]?.fields ?? {};
+  const data = Object.fromEntries(Object.entries(fields).map(([name, field]) => [
+    name,
+    field.type === "number" ? 0 : field.type === "boolean" ? false : "",
+  ]));
+  return { id, type, data };
+}
+
+export function validateBlocks(
+  blocks: ContentBlock[],
+  schema: OpenCmsSchema,
+  contentType = "page",
+) {
+  const errors: Record<string, string> = {};
+  const definition = schema.contentTypes[contentType];
+  if (!definition) return { _page: `Unknown content type: ${contentType}.` };
+
+  for (const block of blocks) {
+    const blockDefinition = schema.blocks[block.type];
+    if (!blockDefinition) {
+      errors[block.id] = `Unknown block type: ${block.type}.`;
+      continue;
+    }
+    if (definition.blocks && !definition.blocks.includes(block.type)) {
+      errors[block.id] = `${blockDefinition.label} is not allowed in ${definition.label}.`;
+      continue;
+    }
+    for (const [fieldName, field] of Object.entries(blockDefinition.fields)) {
+      const value = block.data[fieldName];
+      const key = `${block.id}.${fieldName}`;
+      if (field.required && (value === undefined || value === "")) {
+        errors[key] = `${field.label ?? fieldName} is required.`;
+      } else if (
+        value !== undefined && value !== null && value !== "" &&
+        ((field.type === "number" && (typeof value !== "number" || !Number.isFinite(value))) ||
+          (field.type === "boolean" && typeof value !== "boolean") ||
+          ((field.type === "text" || field.type === "slug") && typeof value !== "string"))
+      ) {
+        errors[key] = `${field.label ?? fieldName} must be a ${field.type}.`;
+      }
+    }
+  }
+  return errors;
+}
+
+export function BlockEditor({
+  blocks,
+  schema,
+  contentType = "page",
+  errors = {},
+  onChange,
+}: {
+  blocks: ContentBlock[];
+  schema: OpenCmsSchema;
+  contentType?: string;
+  errors?: Record<string, string>;
+  onChange: (blocks: ContentBlock[]) => void;
+}) {
+  const shape = useShape();
+  const allowedBlocks = schema.contentTypes[contentType]?.blocks ?? Object.keys(schema.blocks);
+
+  function updateBlock(blockId: string, field: string, value: unknown) {
+    onChange(blocks.map((block) => block.id === blockId
+      ? { ...block, data: { ...block.data, [field]: value } }
+      : block));
+  }
+
+  function moveBlock(index: number, direction: -1 | 1) {
+    const target = index + direction;
+    if (target < 0 || target >= blocks.length) return;
+    const next = [...blocks];
+    [next[index], next[target]] = [next[target], next[index]];
+    onChange(next);
+  }
+
+  return (
+    <section className="space-y-3">
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <p className="text-[12px] font-medium uppercase tracking-[0.16em] text-muted-foreground">Page body</p>
+          <p className="mt-1 text-[12px] text-muted-foreground">Compose the page from structured blocks.</p>
+        </div>
+        <div className="flex flex-wrap justify-end gap-1.5">
+          {allowedBlocks.map((type) => (
+            <Button
+              key={type}
+              type="button"
+              size="compact"
+              variant="tertiary"
+              onClick={() => onChange([...blocks, createBlock(type, schema)])}
+            >
+              + {schema.blocks[type]?.label ?? type}
+            </Button>
+          ))}
+        </div>
+      </div>
+
+      {blocks.length === 0 ? (
+        <div className={`flex min-h-24 items-center justify-center border border-dashed border-border px-4 text-center text-[13px] text-muted-foreground ${shape.container}`}>
+          Add a block to start composing this page.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {blocks.map((block, index) => {
+            const definition = schema.blocks[block.type];
+            if (!definition) return null;
+            return (
+              <div key={block.id} className={`space-y-3 border border-border bg-surface-2 p-3 ${shape.container}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-[13px] font-medium text-foreground">{definition.label}</p>
+                  <div className="flex items-center gap-1">
+                    <Button type="button" size="icon-compact" variant="ghost" disabled={index === 0} onClick={() => moveBlock(index, -1)} aria-label="Move block up">↑</Button>
+                    <Button type="button" size="icon-compact" variant="ghost" disabled={index === blocks.length - 1} onClick={() => moveBlock(index, 1)} aria-label="Move block down">↓</Button>
+                    <Button type="button" size="compact" variant="ghost" onClick={() => onChange([...blocks.slice(0, index + 1), { ...block, id: createBlock(block.type, schema).id, data: { ...block.data } }, ...blocks.slice(index + 1)])}>Duplicate</Button>
+                    <Button type="button" size="compact" variant="ghost" onClick={() => onChange(blocks.filter((item) => item.id !== block.id))}>Remove</Button>
+                  </div>
+                </div>
+                {errors[block.id] && <p className="text-[11px] text-destructive">{errors[block.id]}</p>}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {Object.entries(definition.fields).map(([fieldName, field]) => {
+                    const value = block.data[fieldName];
+                    const label = field.label ?? fieldName;
+                    const error = errors[`${block.id}.${fieldName}`];
+                    if (field.type === "number") {
+                      return (
+                        <label key={fieldName} className="flex flex-col gap-1 text-[12px] text-muted-foreground">
+                          {label}
+                          <input
+                            type="number"
+                            value={typeof value === "number" ? value : ""}
+                            onChange={(event) => updateBlock(block.id, fieldName, Number(event.target.value))}
+                            aria-invalid={!!error}
+                            className={`h-9 bg-transparent px-2.5 text-[13px] text-foreground outline-none ring-1 ${error ? "ring-destructive" : "ring-border"} focus:bg-card ${shape.input}`}
+                          />
+                          {error && <span className="text-[11px] text-destructive">{error}</span>}
+                        </label>
+                      );
+                    }
+                    if (field.type === "boolean") {
+                      return (
+                        <label key={fieldName} className="flex items-center gap-2 text-[12px] text-muted-foreground sm:col-span-2">
+                          <input
+                            type="checkbox"
+                            checked={value === true}
+                            onChange={(event) => updateBlock(block.id, fieldName, event.target.checked)}
+                            className="size-4 accent-foreground"
+                          />
+                          {label}
+                          {error && <span className="text-[11px] text-destructive">{error}</span>}
+                        </label>
+                      );
+                    }
+                    return (
+                      <label key={fieldName} className="flex flex-col gap-1 text-[12px] text-muted-foreground sm:col-span-2">
+                        {label}
+                        <textarea
+                          value={typeof value === "string" ? value : ""}
+                          onChange={(event) => updateBlock(block.id, fieldName, event.target.value)}
+                          placeholder={label}
+                          aria-invalid={!!error}
+                          className={`min-h-16 resize-y bg-transparent px-2.5 py-2 text-[13px] text-foreground outline-none ring-1 ${error ? "ring-destructive" : "ring-border"} focus:bg-card ${shape.input}`}
+                        />
+                        {error && <span className="text-[11px] text-destructive">{error}</span>}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function PageFormDialog({
   title,
   slug,
-  content,
+  blocks,
+  schema,
+  errors,
   isCreating,
   onTitleChange,
   onSlugChange,
-  onContentChange,
+  onBlocksChange,
   onSubmit,
 }: {
   title: string;
   slug: string;
-  content: string;
+  blocks: ContentBlock[];
+  schema: OpenCmsSchema;
+  errors: Record<string, string>;
   isCreating: boolean;
   onTitleChange: (value: string) => void;
   onSlugChange: (value: string) => void;
-  onContentChange: (value: string) => void;
+  onBlocksChange: (blocks: ContentBlock[]) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
-  const shape = useShape();
-
   return (
     <DialogContent size="lg" className="dashboard-surface">
       <DialogHeader>
@@ -217,16 +415,7 @@ function PageFormDialog({
           <InputField index={0} label="Title" placeholder="About us" value={title} onChange={onTitleChange} autoFocus />
           <InputField index={1} label="Slug" placeholder="about-us" value={slug} onChange={onSlugChange} />
         </InputGroup>
-        <label className="flex flex-col gap-2 text-[13px] text-muted-foreground" htmlFor="page-content">
-          Content
-          <textarea
-            id="page-content"
-            value={content}
-            onChange={(event) => onContentChange(event.target.value)}
-            placeholder="Write the page content"
-            className={`min-h-36 w-full resize-y bg-transparent px-3 py-2.5 text-[13px] text-foreground outline-none placeholder:text-muted-foreground ring-1 ring-border transition-all focus:bg-card ${shape.input}`}
-          />
-        </label>
+        <BlockEditor blocks={blocks} schema={schema} errors={errors} onChange={onBlocksChange} />
         <DialogFooter>
           <DialogClose render={<Button variant="ghost">Cancel</Button>} />
           <Button type="submit" loading={isCreating} disabled={!title.trim() || !slug.trim()}>
@@ -241,10 +430,12 @@ function PageFormDialog({
 export default function ProjectClient({ projectId }: { projectId: string }) {
   const { getToken, isLoaded } = useAuth();
   const [environment, setEnvironment] = useState<Environment>("development");
+  const [schema, setSchema] = useState<OpenCmsSchema>(defaultSchema);
   const [pages, setPages] = useState<Document[]>([]);
   const [title, setTitle] = useState("");
   const [slug, setSlug] = useState("");
-  const [content, setContent] = useState("");
+  const [blocks, setBlocks] = useState<ContentBlock[]>([]);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -255,7 +446,9 @@ export default function ProjectClient({ projectId }: { projectId: string }) {
   const loadPages = useCallback(async () => {
     setIsLoading(true);
     try {
-      setPages(await api.pages.list());
+      const [nextSchema, nextPages] = await Promise.all([api.schema.get(), api.pages.list()]);
+      setSchema(nextSchema);
+      setPages(nextPages);
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to load pages");
@@ -271,12 +464,22 @@ export default function ProjectClient({ projectId }: { projectId: string }) {
   async function addPage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!title.trim() || !slug.trim()) return;
+    const nextErrors = validateBlocks(blocks, schema);
+    if (Object.keys(nextErrors).length) {
+      setFormErrors(nextErrors);
+      return;
+    }
     setIsCreating(true);
     try {
-      await api.pages.create({ title: title.trim(), slug: slug.trim(), content });
+      await api.pages.create({
+        title: title.trim(),
+        slug: slug.trim(),
+        content: { version: 1, blocks },
+      });
       setTitle("");
       setSlug("");
-      setContent("");
+      setBlocks([]);
+      setFormErrors({});
       setShowPageDialog(false);
       setMessage(`Page saved to ${environment}.`);
       await loadPages();
@@ -291,7 +494,7 @@ export default function ProjectClient({ projectId }: { projectId: string }) {
     <>
       <Show when="signed-out"><SignInRequired /></Show>
       <Show when="signed-in">
-        <Dialog open={showPageDialog} onOpenChange={setShowPageDialog}>
+        <Dialog open={showPageDialog} onOpenChange={(open) => { setShowPageDialog(open); if (!open) setFormErrors({}); }}>
           <ProjectFrame>
             <div className="flex flex-col gap-10">
               <header className="flex flex-col border-b border-border pb-8">
@@ -306,18 +509,20 @@ export default function ProjectClient({ projectId }: { projectId: string }) {
               {error && <div className="border border-destructive/20 bg-destructive-light/60 px-4 py-3 text-sm text-destructive">{error}</div>}
               {message && <div className="flex items-center gap-2 border border-border bg-surface-2 px-4 py-3 text-sm text-muted-foreground"><Check size={16} />{message}</div>}
 
-              <PageList pages={pages} environment={environment} isLoading={isLoading} />
+          <PageList projectId={projectId} pages={pages} environment={environment} isLoading={isLoading} />
             </div>
           </ProjectFrame>
 
           <PageFormDialog
             title={title}
             slug={slug}
-            content={content}
+            blocks={blocks}
+            schema={schema}
+            errors={formErrors}
             isCreating={isCreating}
             onTitleChange={setTitle}
             onSlugChange={setSlug}
-            onContentChange={setContent}
+            onBlocksChange={(nextBlocks) => { setBlocks(nextBlocks); setFormErrors({}); }}
             onSubmit={addPage}
           />
         </Dialog>

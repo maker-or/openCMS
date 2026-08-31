@@ -10,7 +10,7 @@ export function SiteHeader({ clerkConfigured }: { clerkConfigured: boolean }) {
   const pathname = usePathname();
 
   // The dashboard has its own workspace chrome and should open directly into it.
-  if (pathname === "/dashboard" || pathname.startsWith("/dashboard/")) return null;
+  if (pathname === "/" || pathname === "/dashboard" || pathname.startsWith("/dashboard/")) return null;
 
   return (
     <header className="border-b border-white/10 bg-[#0b0d10]/80 backdrop-blur">

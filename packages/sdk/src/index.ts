@@ -3,21 +3,37 @@ import type {
   CreateDocumentInput,
   Deployment,
   Document,
+  DocumentStatus,
   Environment,
   HealthResponse,
   Project,
+  UpdateDocumentInput,
 } from "./types";
+import { emptyPageContent } from "./schema";
+import type { OpenCmsSchema } from "./schema";
 
 export type {
   CreateDocumentInput,
   CreateProjectInput,
   Deployment,
   Document,
+  DocumentStatus,
   Environment,
   HealthResponse,
   Page,
   Project,
+  UpdateDocumentInput,
 } from "./types";
+export type {
+  ContentBlock,
+  OpenCmsSchema,
+  PageContent,
+  SchemaBlock,
+  SchemaContentType,
+  SchemaField,
+  SchemaFieldType,
+} from "./schema";
+export { defaultSchema, emptyPageContent } from "./schema";
 
 export interface OpenCmsSdkOptions {
   baseUrl?: string;
@@ -85,6 +101,20 @@ export function createSdk(options: OpenCmsSdkOptions = {}) {
           body: JSON.stringify(input),
         }),
     },
+    schema: {
+      get: () => {
+        if (!projectId) throw new Error("projectId is required to get the schema");
+        return request<OpenCmsSchema>(`/api/projects/${projectId}/schema`);
+      },
+      update: (schema: OpenCmsSchema) => {
+        if (!projectId) throw new Error("projectId is required to update the schema");
+        return request<OpenCmsSchema>(`/api/projects/${projectId}/schema`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(schema),
+        });
+      },
+    },
     pages: {
       list: () => {
         if (!projectId) throw new Error("projectId is required to list pages");
@@ -97,7 +127,25 @@ export function createSdk(options: OpenCmsSdkOptions = {}) {
         return request<Document>(`/api/projects/${projectId}/pages`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...input, environment, content: input.content ?? emptyPageContent }),
+        });
+      },
+      get: (documentId: string) => {
+        if (!projectId) throw new Error("projectId is required to get pages");
+        return request<Document>(`/api/projects/${projectId}/pages/${documentId}?environment=${environment}`);
+      },
+      update: (documentId: string, input: UpdateDocumentInput) => {
+        if (!projectId) throw new Error("projectId is required to update pages");
+        return request<Document>(`/api/projects/${projectId}/pages/${documentId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ...input, environment }),
+        });
+      },
+      delete: (documentId: string) => {
+        if (!projectId) throw new Error("projectId is required to delete pages");
+        return request<{ deleted: true }>(`/api/projects/${projectId}/pages/${documentId}?environment=${environment}`, {
+          method: "DELETE",
         });
       },
     },
@@ -114,12 +162,32 @@ export function createSdk(options: OpenCmsSdkOptions = {}) {
           `/api/projects/${projectId}/pages?environment=${environment}`,
         );
       },
-      create: (input: CreateDocumentInput) =>
-        request<Document>(`/api/projects/${projectId ?? ""}/pages`, {
+      create: (input: CreateDocumentInput) => {
+        if (!projectId) throw new Error("projectId is required to create documents");
+        return request<Document>(`/api/projects/${projectId}/pages`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...input, environment, content: input.content ?? emptyPageContent }),
+        });
+      },
+      get: (documentId: string) => {
+        if (!projectId) throw new Error("projectId is required to get documents");
+        return request<Document>(`/api/projects/${projectId}/pages/${documentId}?environment=${environment}`);
+      },
+      update: (documentId: string, input: UpdateDocumentInput) => {
+        if (!projectId) throw new Error("projectId is required to update documents");
+        return request<Document>(`/api/projects/${projectId}/pages/${documentId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ...input, environment }),
-        }),
+        });
+      },
+      delete: (documentId: string) => {
+        if (!projectId) throw new Error("projectId is required to delete documents");
+        return request<{ deleted: true }>(`/api/projects/${projectId}/pages/${documentId}?environment=${environment}`, {
+          method: "DELETE",
+        });
+      },
     },
   };
 }

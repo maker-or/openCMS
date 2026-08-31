@@ -35,21 +35,52 @@ packages/
    OPENCMS_CLERK_TOKEN=your_session_token bun run dev:cli
    ```
 
-The web app serves the Elysia API at `/api/health`, `/api/projects`, and `/api/projects/:id/pages`. Project and page endpoints require a Clerk session token and store records in Neon through Drizzle.
+The web app serves the Elysia API at `/api/health`, `/api/projects`, `/api/projects/:id/schema`, and `/api/projects/:id/pages`. Project, schema, and page endpoints require a Clerk session token and store records in Neon through Drizzle.
 
 ## CLI workflow
 
 The CLI pulls the canonical Next.js app from a separately versioned GitHub template repository. Set `OPENCMS_TEMPLATE_REPO` to that repository while developing locally. The template should include a `cms/` directory and consume `NEXT_PUBLIC_OPENCMS_PROJECT_ID`, `OPENCMS_API_URL`, and `OPENCMS_ENVIRONMENT`.
 
 ```bash
-npx opencms login
-npx opencms create
+npx @maker-or/opencms login
+npx @maker-or/opencms create
 cd my-project
-npx opencms dev
-npx opencms deploy
+npx @maker-or/opencms dev
+npx @maker-or/opencms deploy
 ```
 
-`opencms create` authenticates in the browser, creates a cloud project, clones the template, writes `.env.local`, adds `cms/opencms.ts`, and installs dependencies. The CLI stores its session token in `~/.config/opencms/config.json`; `OPENCMS_CLERK_TOKEN` can be used for non-interactive local testing.
+`opencms create` authenticates in the browser, creates a cloud project, clones the template, writes `.env.local`, adds `cms/opencms.ts` and the starter `cms/schema.json`, and installs dependencies. Pages use JSON content made of ordered blocks; Markdown is not part of the content model. The CLI syncs `cms/schema.json` to the development environment before `dev` and `deploy`. The CLI stores its session token in `~/.config/opencms/config.json`; `OPENCMS_CLERK_TOKEN` can be used for non-interactive local testing.
+
+### Defining content
+
+After creating a project, edit `cms/schema.json` in the generated Next.js application. A schema declares reusable blocks and content types. The starter schema includes a `page` type with `heading`, `text`, `quote`, and `feature-list` blocks:
+
+```json
+{
+  "version": 1,
+  "blocks": {
+    "hero": {
+      "label": "Hero",
+      "fields": {
+        "headline": { "type": "text", "required": true },
+        "centered": { "type": "boolean" }
+      }
+    }
+  },
+  "contentTypes": {
+    "page": {
+      "label": "Page",
+      "fields": {
+        "title": { "type": "text", "required": true },
+        "slug": { "type": "slug", "required": true, "unique": true }
+      },
+      "blocks": ["hero"]
+    }
+  }
+}
+```
+
+The supported field types are `text`, `slug`, `number`, and `boolean`. Run `npx @maker-or/opencms dev` after changing the file to sync it to development. The dashboard then uses that schema when creating pages, and each page is stored as JSON with an ordered `blocks` array.
 
 Set `VERCEL_TOKEN` when `opencms deploy` should also run the Vercel production deployment for the current application. Without it, deploy promotes CMS content only.
 

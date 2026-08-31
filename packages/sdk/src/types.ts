@@ -1,17 +1,25 @@
+import type { ContentBlock, OpenCmsSchema, PageContent } from "./schema";
+
+export type { ContentBlock, OpenCmsSchema, PageContent } from "./schema";
+
 export interface Document {
   id: string;
   projectId: string;
   ownerId: string;
   environment: Environment;
+  contentType: string;
+  status: DocumentStatus;
   title: string;
   slug: string;
-  content: string;
+  content: PageContent;
   createdAt: string;
   updatedAt: string;
+  publishedAt: string | null;
 }
 
 export type Page = Document;
 export type Environment = "development" | "production";
+export type DocumentStatus = "draft" | "published";
 
 export interface Project {
   id: string;
@@ -38,7 +46,17 @@ export interface CreateProjectInput {
 export interface CreateDocumentInput {
   title: string;
   slug: string;
-  content?: string;
+  content?: PageContent;
+  contentType?: string;
+  status?: DocumentStatus;
+}
+
+export interface UpdateDocumentInput {
+  title?: string;
+  slug?: string;
+  content?: PageContent;
+  contentType?: string;
+  status?: DocumentStatus;
 }
 
 export interface HealthResponse {
