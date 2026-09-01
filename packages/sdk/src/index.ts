@@ -56,13 +56,13 @@ export class OpenCmsApiError extends Error {
 export function createSdk(options: OpenCmsSdkOptions = {}) {
   const defaultBaseUrl = typeof window === "undefined" ? undefined : window.location.origin;
   const configuredBaseUrl = options.baseUrl ?? defaultBaseUrl;
-  if (!configuredBaseUrl) {
-    throw new Error("baseUrl is required when using the OpenCMS SDK outside a browser.");
-  }
-  const baseUrl = configuredBaseUrl.replace(
+  // Client components can be rendered on the server before their browser-only
+  // effects run. Keep the SDK constructible in that phase and use a relative
+  // URL once the request is made in the browser.
+  const baseUrl = configuredBaseUrl?.replace(
     /\/$/,
     "",
-  );
+  ) ?? "";
   const fetcher = options.fetch ?? globalThis.fetch;
   const projectId = options.projectId;
   const environment = options.environment ?? "development";
@@ -74,6 +74,10 @@ export function createSdk(options: OpenCmsSdkOptions = {}) {
     const token = await options.getToken?.();
     if (token) {
       headers.set("Authorization", `Bearer ${token}`);
+    }
+
+    if (!baseUrl && typeof window === "undefined") {
+      throw new Error("baseUrl is required when making OpenCMS SDK requests outside a browser.");
     }
 
     const response = await fetcher(`${baseUrl}${path}`, {

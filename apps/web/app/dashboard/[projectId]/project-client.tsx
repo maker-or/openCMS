@@ -440,6 +440,7 @@ function PageFormDialog({
   blocks,
   schema,
   errors,
+  saveError,
   isCreating,
   onTitleChange,
   onSlugChange,
@@ -451,6 +452,7 @@ function PageFormDialog({
   blocks: ContentBlock[];
   schema: OpenCmsSchema;
   errors: Record<string, string>;
+  saveError: string | null;
   isCreating: boolean;
   onTitleChange: (value: string) => void;
   onSlugChange: (value: string) => void;
@@ -464,14 +466,20 @@ function PageFormDialog({
         <DialogDescription>Saved directly to the selected environment.</DialogDescription>
       </DialogHeader>
       <form onSubmit={onSubmit} className="space-y-5">
+        {saveError && (
+          <div role="alert" className="border border-destructive/20 bg-destructive-light/60 px-4 py-3 text-sm text-destructive">
+            {saveError}
+          </div>
+        )}
         <InputGroup className="w-full">
           <InputField index={0} label="Title" placeholder="About us" value={title} onChange={onTitleChange} autoFocus />
           <InputField index={1} label="Slug" placeholder="about-us" value={slug} onChange={onSlugChange} />
         </InputGroup>
+        {errors._page && <p className="text-[12px] text-destructive">{errors._page}</p>}
         <BlockEditor blocks={blocks} schema={schema} errors={errors} onChange={onBlocksChange} />
         <DialogFooter>
-          <DialogClose render={<Button variant="ghost">Cancel</Button>} />
-          <Button type="submit" loading={isCreating} disabled={!title.trim() || !slug.trim()}>
+          <DialogClose render={<Button type="button" variant="ghost">Cancel</Button>} />
+          <Button type="submit" loading={isCreating} disabled={isCreating}>
             Save page
           </Button>
         </DialogFooter>
@@ -489,6 +497,7 @@ export default function ProjectClient({ projectId }: { projectId: string }) {
   const [slug, setSlug] = useState("");
   const [blocks, setBlocks] = useState<ContentBlock[]>([]);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -516,13 +525,19 @@ export default function ProjectClient({ projectId }: { projectId: string }) {
 
   async function addPage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!title.trim() || !slug.trim()) return;
+    if (!title.trim() || !slug.trim()) {
+      setFormErrors({ _page: "Title and slug are required." });
+      setSaveError(null);
+      return;
+    }
     const nextErrors = validateBlocks(blocks, schema);
     if (Object.keys(nextErrors).length) {
       setFormErrors(nextErrors);
+      setSaveError(null);
       return;
     }
     setIsCreating(true);
+    setSaveError(null);
     try {
       await api.pages.create({
         title: title.trim(),
@@ -537,7 +552,7 @@ export default function ProjectClient({ projectId }: { projectId: string }) {
       setMessage(`Page saved to ${environment}.`);
       await loadPages();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to save page");
+      setSaveError(cause instanceof Error ? cause.message : "Unable to save page");
     } finally {
       setIsCreating(false);
     }
@@ -547,7 +562,11 @@ export default function ProjectClient({ projectId }: { projectId: string }) {
     <>
       <Show when="signed-out"><SignInRequired /></Show>
       <Show when="signed-in">
-        <Dialog open={showPageDialog} onOpenChange={(open) => { setShowPageDialog(open); if (!open) setFormErrors({}); }}>
+        <Dialog open={showPageDialog} onOpenChange={(open) => {
+          setShowPageDialog(open);
+          setSaveError(null);
+          if (!open) setFormErrors({});
+        }}>
           <ProjectFrame>
             <div className="flex flex-col gap-10">
               <header className="flex flex-col border-b border-border pb-8">
@@ -573,9 +592,10 @@ export default function ProjectClient({ projectId }: { projectId: string }) {
             schema={schema}
             errors={formErrors}
             isCreating={isCreating}
-            onTitleChange={setTitle}
-            onSlugChange={setSlug}
-            onBlocksChange={(nextBlocks) => { setBlocks(nextBlocks); setFormErrors({}); }}
+            saveError={saveError}
+            onTitleChange={(value) => { setTitle(value); setFormErrors({}); setSaveError(null); }}
+            onSlugChange={(value) => { setSlug(value); setFormErrors({}); setSaveError(null); }}
+            onBlocksChange={(nextBlocks) => { setBlocks(nextBlocks); setFormErrors({}); setSaveError(null); }}
             onSubmit={addPage}
           />
         </Dialog>

@@ -17,12 +17,8 @@ import {
   type Project,
 } from "../../../packages/sdk/src/index";
 
-const hostedUrl = "https://web-eta-ten-16.vercel.app";
-const dashboardUrl = process.env.OPENCMS_DASHBOARD_URL ?? hostedUrl;
-const apiUrl = process.env.OPENCMS_API_URL ?? hostedUrl;
 const configRoot = process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config");
 const configPath = join(configRoot, "opencms", "config.json");
-const legacyLocalApiUrl = "http://localhost:3000";
 
 interface CliConfig {
   token?: string;
@@ -48,10 +44,30 @@ function tokenFor(config: CliConfig) {
   return process.env.OPENCMS_CLERK_TOKEN ?? config.token ?? null;
 }
 
+function requireEndpoint(endpoint: string | undefined) {
+  const normalized = endpoint?.trim().replace(/\/$/, "");
+  if (!normalized) {
+    throw new Error("OpenCMS endpoint is not configured. Set OPENCMS_URL to your OpenCMS dashboard/API origin and try again.");
+  }
+  return normalized;
+}
+
 function apiUrlFor(config?: CliConfig) {
-  if (process.env.OPENCMS_API_URL) return process.env.OPENCMS_API_URL;
-  if (config?.apiUrl && config.apiUrl !== legacyLocalApiUrl) return config.apiUrl;
-  return apiUrl;
+  return requireEndpoint(
+    process.env.OPENCMS_URL
+      ?? process.env.OPENCMS_API_URL
+      ?? config?.apiUrl
+      ?? process.env.OPENCMS_DASHBOARD_URL,
+  );
+}
+
+function dashboardUrlFor(config?: CliConfig) {
+  return requireEndpoint(
+    process.env.OPENCMS_URL
+      ?? process.env.OPENCMS_DASHBOARD_URL
+      ?? process.env.OPENCMS_API_URL
+      ?? config?.apiUrl,
+  );
 }
 
 function sdk(config: CliConfig, projectId?: string) {
@@ -96,7 +112,7 @@ async function openBrowser(url: string) {
   await runCommand(command[0], command.slice(1));
 }
 
-async function browserLogin() {
+async function browserLogin(config: CliConfig) {
   let resolveToken: (token: string) => void = () => undefined;
   let rejectLogin: (error: Error) => void = () => undefined;
   const tokenPromise = new Promise<string>((resolve, reject) => {
@@ -129,7 +145,7 @@ async function browserLogin() {
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Unable to start the login callback server.");
   const callback = `http://127.0.0.1:${address.port}/callback`;
-  const loginUrl = `${dashboardUrl.replace(/\/$/, "")}/cli/login?redirect_uri=${encodeURIComponent(callback)}`;
+  const loginUrl = `${dashboardUrlFor(config)}/cli/login?redirect_uri=${encodeURIComponent(callback)}`;
   console.log(`Opening ${loginUrl}`);
   try {
     await openBrowser(loginUrl);
@@ -149,7 +165,7 @@ async function browserLogin() {
 async function ensureToken(config: CliConfig) {
   const token = tokenFor(config);
   if (token) return token;
-  const loggedInToken = await browserLogin();
+  const loggedInToken = await browserLogin(config);
   await writeConfig({ ...config, token: loggedInToken, apiUrl: apiUrlFor(config) });
   return loggedInToken;
 }
@@ -159,7 +175,7 @@ async function reauthenticate(config: CliConfig) {
     throw new Error("OPENCMS_CLERK_TOKEN was rejected or expired. Provide a fresh token or unset the variable to use browser login.");
   }
   console.log("Your OpenCMS session has expired. Opening browser login…");
-  const loggedInToken = await browserLogin();
+  const loggedInToken = await browserLogin(config);
   await writeConfig({ ...config, token: loggedInToken, apiUrl: apiUrlFor(config) });
   return loggedInToken;
 }
@@ -171,7 +187,7 @@ async function login() {
     console.log("Saved OPENCMS_CLERK_TOKEN for local CLI use.");
     return;
   }
-  const loggedInToken = await browserLogin();
+  const loggedInToken = await browserLogin(config);
   await writeConfig({ ...config, token: loggedInToken, apiUrl: apiUrlFor(config) });
   console.log("Logged in to OpenCMS.");
 }
@@ -205,7 +221,7 @@ async function ensureCmsDirectory(destination: string, project: Project, baseUrl
   await mkdir(cmsDirectory, { recursive: true });
   const configFile = join(cmsDirectory, "opencms.ts");
   if (!(await fileExists(configFile))) {
-    await writeFile(configFile, `export const opencms = {\n  projectId: process.env.NEXT_PUBLIC_OPENCMS_PROJECT_ID ?? "${project.id}",\n  apiUrl: process.env.OPENCMS_API_URL ?? "${baseUrl}",\n  environment: process.env.OPENCMS_ENVIRONMENT ?? "development",\n} as const;\n`, "utf8");
+    await writeFile(configFile, `export const opencms = {\n  projectId: process.env.NEXT_PUBLIC_OPENCMS_PROJECT_ID ?? "",\n  apiUrl: process.env.OPENCMS_API_URL ?? "",\n  environment: process.env.OPENCMS_ENVIRONMENT ?? "development",\n} as const;\n`, "utf8");
   }
   const schemaFile = join(cmsDirectory, "schema.json");
   if (!(await fileExists(schemaFile))) {
@@ -266,7 +282,7 @@ async function createProject() {
   await writeConfig({ ...(await readConfig()), projectId: project.id, apiUrl: baseUrl });
   console.log(`\nCreated ${project.name}.`);
   console.log(`Project ID: ${project.id}`);
-  console.log(`Dashboard: ${dashboardUrl.replace(/\/$/, "")}/dashboard/${project.id}`);
+  console.log(`Dashboard: ${dashboardUrlFor(await readConfig())}/dashboard/${project.id}`);
   console.log(`\nNext steps:\n  cd ${slugify(project.name)}\n  npx @maker-or/opencms dev\n  npx @maker-or/opencms deploy`);
 }
 
@@ -281,7 +297,14 @@ async function runDev() {
     await syncLocalSchema(await projectIdFromEnv(), await readConfig());
   }
   const manager = await packageManager(process.cwd());
-  const command = manager[0] === "npm" ? ["npm", "run", "dev"] : manager[0] === "pnpm" ? ["pnpm", "dev"] : manager[0] === "yarn" ? ["yarn", "dev"] : ["bun", "run", "dev"];
+  const script = await nextDevScript(process.cwd());
+  const command = manager[0] === "npm"
+    ? ["npm", "run", script]
+    : manager[0] === "pnpm"
+      ? ["pnpm", script]
+      : manager[0] === "yarn"
+        ? ["yarn", script]
+        : ["bun", "run", script];
   process.exit(await runCommand(command[0], command.slice(1), {
     cwd: process.cwd(),
     env: {
@@ -291,6 +314,26 @@ async function runDev() {
     },
     inherit: true,
   }));
+}
+
+async function nextDevScript(destination: string) {
+  const packagePath = join(destination, "package.json");
+  if (!(await fileExists(packagePath))) return "dev";
+
+  try {
+    const packageJson = JSON.parse(await readFile(packagePath, "utf8")) as {
+      scripts?: Record<string, unknown>;
+    };
+    if (typeof packageJson.scripts?.["dev:next"] === "string") return "dev:next";
+    if (typeof packageJson.scripts?.dev === "string" && /opencms(?:@[^\s]+)?\s+dev/.test(packageJson.scripts.dev)) {
+      throw new Error("This OpenCMS template is missing its dev:next script. Update the template before running opencms dev.");
+    }
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new Error("package.json is not valid JSON.");
+    throw error;
+  }
+
+  return "dev";
 }
 
 async function syncLocalSchema(projectId: string | undefined, config: CliConfig) {

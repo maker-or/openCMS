@@ -25,4 +25,11 @@ The generated `cms/schema.json` file defines the project's content types and all
 
 The CLI stores its local login configuration in `~/.config/opencms/config.json` (or `$XDG_CONFIG_HOME/opencms/config.json` when configured).
 
-The CLI defaults to the hosted OpenCMS dashboard and API. Use `OPENCMS_DASHBOARD_URL` and `OPENCMS_API_URL` to target a local or self-hosted instance.
+The CLI uses the OpenCMS control-plane origin from `OPENCMS_URL`. Set it to the dashboard/API origin for your hosted, local, or self-hosted instance. `OPENCMS_API_URL` and `OPENCMS_DASHBOARD_URL` remain supported as separate legacy overrides, but there is no baked-in deployment URL.
+
+For example:
+
+```bash
+export OPENCMS_URL=https://your-opencms-domain.example
+npx @maker-or/opencms login
+```
