@@ -53,6 +53,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isUniqueViolation(error: unknown) {
+  return isRecord(error) && error.code === "23505";
+}
+
 function slugify(value: string) {
   return value
     .trim()
@@ -247,10 +251,19 @@ const app = new Elysia({ prefix: "/api" })
       }
 
       const db = createDb();
-      const [project] = await db
-        .insert(projects)
-        .values({ ownerId: userId, name: body.name.trim(), slug: slugify(body.name) })
-        .returning();
+      let project;
+      try {
+        [project] = await db
+          .insert(projects)
+          .values({ ownerId: userId, name: body.name.trim(), slug: slugify(body.name) })
+          .returning();
+      } catch (error) {
+        if (isUniqueViolation(error)) {
+          set.status = 409;
+          return { error: "A project with that name already exists." };
+        }
+        throw error;
+      }
 
       await db.insert(contentSchemas).values({
         projectId: project.id,

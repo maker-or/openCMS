@@ -214,7 +214,7 @@ export default function DashboardClient() {
                 </header>
 
                 {error && <div className="border border-destructive/20 bg-destructive-light/60 px-4 py-3 text-sm text-destructive">{error}</div>}
-                <CardGroup orientation="inline" border="outlined" className="bg-surface-2 shadow-surface-2 p-4 max-w-2xl">
+                <CardGroup orientation="inline" border="outlined" className="mx-auto w-full max-w-2xl bg-surface-2 p-4 shadow-surface-2">
                   {projects.map((project) => (
                     <Card key={project.id} href={`/dashboard/${project.id}`} label={`Open ${project.name}`}>
                       <CardMedia label={project.name} />

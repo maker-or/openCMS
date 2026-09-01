@@ -27,7 +27,6 @@ import { TabItem, Tabs, TabsList } from "@/components/ui/tabs";
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -42,6 +41,7 @@ import {
 } from "@/components/ui/sidebar";
 import { useShape } from "@/lib/shape-context";
 import { SurfaceProvider } from "@/lib/surface-context";
+import type { IconComponent, IconComponentProps } from "@/lib/icon-context";
 import {
   createSdk,
   defaultSchema,
@@ -54,7 +54,7 @@ import { ThemeToggle } from "../../theme-provider";
 
 export function ProjectFrame({ children }: { children: React.ReactNode }) {
   return (
-    <SidebarProvider defaultOpen persist={false} shortcut={null} width="220px">
+    <SidebarProvider defaultOpen persist={false} shortcut={null} width="112px">
       <div className="dashboard-surface flex min-h-screen w-full bg-surface-1">
         <ProjectSidebar />
         <SidebarInset className="dashboard-surface min-h-screen bg-surface-2 shadow-surface-2">
@@ -74,37 +74,93 @@ export function ProjectFrame({ children }: { children: React.ReactNode }) {
 }
 
 function ProjectSidebar() {
-  const items = ["Overview", "Pages", "Content", "Deployments", "Settings"];
+  const items: Array<{ label: string; icon: IconComponent }> = [
+    { label: "Overview", icon: OverviewIcon },
+    { label: "Pages", icon: PagesIcon },
+    { label: "Content", icon: NewContentIcon },
+    { label: "Deployments", icon: DeploymentsIcon },
+    { label: "Settings", icon: SettingsIcon },
+  ];
+  const activeItem = "Content";
 
   return (
     <Sidebar variant="inset" bordered collapsible="offcanvas" rail={false} className="bg-surface-1">
-      <SidebarHeader className="gap-6 p-5">
+      <SidebarHeader className="items-center gap-6 p-3">
         <Button variant="ghost" size="compact" asChild className="self-start">
           <Link href="/dashboard"><ArrowLeft /></Link>
         </Button>
       </SidebarHeader>
       <SidebarSeparator />
       <SidebarContent>
-        <SidebarGroup className="px-3 py-5">
-          <SidebarGroupLabel>Project</SidebarGroupLabel>
+        <SidebarGroup className="px-2 py-5">
+          <SidebarGroupLabel className="sr-only">Project</SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu size="compact">
-              {items.map((item) => (
-                <SidebarMenuItem key={item}>
-                  <SidebarMenuButton isActive={item === "Content"} disabled={item !== "Content"}>
-                    {item}
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+            <SidebarMenu className="gap-8">
+              {items.map(({ label, icon: Icon }) => {
+                const isActive = label === activeItem;
+                return (
+                  <SidebarMenuItem key={label}>
+                    <SidebarMenuButton
+                      icon={Icon}
+                      aria-label={label}
+                      title={label}
+                      isActive={isActive}
+                      disabled={!isActive}
+                      size="lg"
+                      className={`justify-center pl-0 pr-0 [&>span:last-child]:hidden [&>svg]:size-11 ${isActive ? "[&>span:first-child]:text-[#3937E0] [&>svg]:text-[#3937E0]" : "[&>span:first-child]:text-muted-foreground/60 [&>svg]:text-muted-foreground/60"}`}
+                    />
+                  </SidebarMenuItem>
+                );
+              })}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter className="p-4">
-        <p className="font-mono text-[10px] text-muted-foreground/70">OpenCMS</p>
-      </SidebarFooter>
     </Sidebar>
   );
+}
+
+function SidebarAssetIcon({ src, size = 18, className }: IconComponentProps & { src: string }) {
+  const iconSize = Math.max(size, 44);
+
+  return (
+    <span
+      aria-hidden="true"
+      className={`block shrink-0 bg-current ${className ?? ""}`}
+      style={{
+        width: iconSize,
+        height: iconSize,
+        maskImage: `url("${src}")`,
+        WebkitMaskImage: `url("${src}")`,
+        maskPosition: "center",
+        WebkitMaskPosition: "center",
+        maskRepeat: "no-repeat",
+        WebkitMaskRepeat: "no-repeat",
+        maskSize: "contain",
+        WebkitMaskSize: "contain",
+      }}
+    />
+  );
+}
+
+function PagesIcon(props: IconComponentProps) {
+  return <SidebarAssetIcon {...props} src="/sidebar-icons/pages.svg" />;
+}
+
+function OverviewIcon(props: IconComponentProps) {
+  return <SidebarAssetIcon {...props} src="/sidebar-icons/content.svg" />;
+}
+
+function NewContentIcon(props: IconComponentProps) {
+  return <SidebarAssetIcon {...props} src="/sidebar-icons/content-new.svg" />;
+}
+
+function DeploymentsIcon(props: IconComponentProps) {
+  return <SidebarAssetIcon {...props} src="/sidebar-icons/deployments.svg" />;
+}
+
+function SettingsIcon(props: IconComponentProps) {
+  return <SidebarAssetIcon {...props} src="/sidebar-icons/settings.svg" />;
 }
 
 export function SignInRequired() {

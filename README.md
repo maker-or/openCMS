@@ -39,7 +39,7 @@ The web app serves the Elysia API at `/api/health`, `/api/projects`, `/api/proje
 
 ## CLI workflow
 
-The CLI pulls the canonical Next.js app from a separately versioned GitHub template repository. Set `OPENCMS_TEMPLATE_REPO` to that repository while developing locally. The template should include a `cms/` directory and consume `NEXT_PUBLIC_OPENCMS_PROJECT_ID`, `OPENCMS_API_URL`, and `OPENCMS_ENVIRONMENT`.
+The CLI pulls the canonical Next.js app from the separately versioned [nextjs-template repository](https://github.com/maker-or/nextjs-template). Set `OPENCMS_TEMPLATE_REPO` to that repository while developing locally. The template includes a `cms/` directory and consumes `NEXT_PUBLIC_OPENCMS_PROJECT_ID`, `OPENCMS_API_URL`, and `OPENCMS_ENVIRONMENT`.
 
 ```bash
 npx @maker-or/opencms login

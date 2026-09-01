@@ -219,7 +219,7 @@ async function installDependencies(destination: string) {
 }
 
 async function pullTemplate(destination: string) {
-  const repository = process.env.OPENCMS_TEMPLATE_REPO ?? "https://github.com/opencms/template-nextjs.git";
+  const repository = process.env.OPENCMS_TEMPLATE_REPO ?? "https://github.com/maker-or/nextjs-template.git";
   if (await fileExists(destination)) throw new Error(`Destination already exists: ${destination}`);
   console.log("Pulling the OpenCMS Next.js template…");
   if (await runCommand("git", ["clone", "--depth", "1", repository, destination], { inherit: true }) !== 0) {

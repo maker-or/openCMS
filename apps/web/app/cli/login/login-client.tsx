@@ -3,6 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Show, SignInButton, useAuth } from "@clerk/nextjs";
+import { GeistPixelSquare } from "geist/font/pixel";
 
 export default function CliLoginClient() {
   const params = useSearchParams();
@@ -27,5 +28,36 @@ export default function CliLoginClient() {
     return () => { cancelled = true; };
   }, [getToken, isLoaded, redirectUri]);
 
-  return <main className="flex min-h-screen items-center justify-center bg-[#0b0d10] px-6"><div className="w-full max-w-sm rounded-3xl border border-white/10 bg-white/[0.04] p-8 text-center shadow-2xl shadow-black/30"><div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-cyan-300 text-sm font-semibold text-black">OC</div><p className="mt-6 text-xs uppercase tracking-[0.22em] text-cyan-300">OpenCMS CLI</p><h1 className="mt-3 text-2xl font-semibold tracking-tight text-white">Connect this terminal.</h1><p className="mt-3 text-sm leading-6 text-zinc-400">Sign in once, then return to your terminal to create and deploy projects.</p>{error && <p className="mt-5 rounded-xl bg-red-300/10 px-3 py-2 text-xs text-red-200">{error}</p>}<Show when="signed-out"><SignInButton mode="modal"><button className="mt-7 w-full rounded-full bg-white py-3 text-sm font-medium text-black transition hover:bg-cyan-100">Sign in to continue</button></SignInButton></Show><Show when="signed-in"><p className="mt-7 rounded-full border border-cyan-300/20 bg-cyan-300/10 py-3 text-sm text-cyan-100">Finishing sign-in…</p></Show></div></main>;
+  return (
+    <main
+      className="relative isolate min-h-screen overflow-hidden bg-[#000] bg-[position:center_10%] bg-no-repeat"
+
+    >
+      <div className="flex min-h-screen items-center justify-center px-6 py-16">
+        <section className="flex -translate-y-[5vh] flex-col items-center text-center">
+          <h1 className={`${GeistPixelSquare.className} mt-6 text-[clamp(2.5rem,5vw,5rem)] font-semibold leading-none tracking-[-0.06em] text-white`}>
+            Connect your account
+          </h1>
+
+          {error && (
+            <p role="alert" className={`${GeistPixelSquare.className} mt-6 border border-white bg-white px-4 py-3 text-sm text-black`}>
+              {error}
+            </p>
+          )}
+          <Show when="signed-out">
+            <SignInButton mode="modal">
+              <button className={`${GeistPixelSquare.className} mt-8 bg-white px-6 py-4 text-base font-semibold leading-none text-black transition hover:bg-cyan-100`}>
+                Sign in to continue
+              </button>
+            </SignInButton>
+          </Show>
+          <Show when="signed-in">
+            <p className={`${GeistPixelSquare.className} mt-8 border border-white/60 px-5 py-3 text-sm text-white`}>
+              Finishing sign-in…
+            </p>
+          </Show>
+        </section>
+      </div>
+    </main>
+  );
 }
