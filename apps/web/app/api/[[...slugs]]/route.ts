@@ -27,6 +27,7 @@ export const dynamic = "force-dynamic";
 
 const environments = ["development", "production"] as const;
 const fieldTypes = ["text", "slug", "number", "boolean"] as const;
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 async function getUserId(request: Request) {
   if (!process.env.CLERK_SECRET_KEY || !process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
@@ -53,6 +54,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isUuid(value: string) {
+  return uuidPattern.test(value);
+}
+
 function isUniqueViolation(error: unknown) {
   return isRecord(error) && error.code === "23505";
 }
@@ -74,6 +79,7 @@ function getEnvironment(request: Request): Environment {
 
 async function ownedProject(projectId: string, userId: string) {
   const db = createDb();
+  if (!isUuid(projectId)) return { db, project: undefined };
   const [project] = await db
     .select()
     .from(projects)
@@ -277,6 +283,45 @@ const app = new Elysia({ prefix: "/api" })
     },
     { body: t.Object({ name: t.String({ minLength: 1, maxLength: 80 }) }) },
   )
+  .get("/delivery/projects/:projectId/pages", async ({ request, params, set }) => {
+    const db = createDb();
+    if (!isUuid(params.projectId)) {
+      set.status = 404;
+      return { error: "Project not found" };
+    }
+    const [project] = await db
+      .select({ id: projects.id })
+      .from(projects)
+      .where(eq(projects.id, params.projectId))
+      .limit(1);
+
+    if (!project) {
+      set.status = 404;
+      return { error: "Project not found" };
+    }
+
+    return db
+      .select({
+        id: documents.id,
+        projectId: documents.projectId,
+        environment: documents.environment,
+        contentType: documents.contentType,
+        status: documents.status,
+        title: documents.title,
+        slug: documents.slug,
+        content: documents.content,
+        createdAt: documents.createdAt,
+        updatedAt: documents.updatedAt,
+        publishedAt: documents.publishedAt,
+      })
+      .from(documents)
+      .where(and(
+        eq(documents.projectId, project.id),
+        eq(documents.environment, getEnvironment(request)),
+        eq(documents.status, "published"),
+      ))
+      .orderBy(desc(documents.updatedAt));
+  })
   .get("/projects/:projectId/schema", async ({ request, params, set }) => {
     const userId = await getUserId(request);
     if (!userId) {
@@ -355,6 +400,10 @@ const app = new Elysia({ prefix: "/api" })
       set.status = 404;
       return { error: "Project not found" };
     }
+    if (!isUuid(params.documentId)) {
+      set.status = 404;
+      return { error: "Page not found" };
+    }
     const [page] = await db
       .select()
       .from(documents)
@@ -432,6 +481,10 @@ const app = new Elysia({ prefix: "/api" })
         set.status = 404;
         return { error: "Project not found" };
       }
+      if (!isUuid(params.documentId)) {
+        set.status = 404;
+        return { error: "Page not found" };
+      }
       const environment = body.environment ?? getEnvironment(request);
       const [existing] = await db
         .select()
@@ -492,6 +545,10 @@ const app = new Elysia({ prefix: "/api" })
     if (!project) {
       set.status = 404;
       return { error: "Project not found" };
+    }
+    if (!isUuid(params.documentId)) {
+      set.status = 404;
+      return { error: "Page not found" };
     }
     const result = await db
       .delete(documents)
