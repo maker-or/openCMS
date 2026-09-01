@@ -19,6 +19,8 @@ npx @maker-or/opencms deploy
 
 `opencms create` authenticates you, creates an OpenCMS project, pulls the Next.js template, writes the project configuration, and installs dependencies.
 
+`opencms login` refreshes the saved browser session. The CLI also retries a management request once with a fresh browser session when the saved session has expired.
+
 The generated `cms/schema.json` file defines the project's content types and allowed blocks. The CLI syncs it to the development environment when `dev` or `deploy` runs.
 
 The CLI stores its local login configuration in `~/.config/opencms/config.json` (or `$XDG_CONFIG_HOME/opencms/config.json` when configured).

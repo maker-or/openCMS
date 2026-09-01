@@ -148,6 +148,9 @@ async function ensureToken(config: CliConfig) {
 }
 
 async function reauthenticate(config: CliConfig) {
+  if (process.env.OPENCMS_CLERK_TOKEN) {
+    throw new Error("OPENCMS_CLERK_TOKEN was rejected or expired. Provide a fresh token or unset the variable to use browser login.");
+  }
   console.log("Your OpenCMS session has expired. Opening browser login…");
   const loggedInToken = await browserLogin();
   await writeConfig({ ...config, token: loggedInToken, apiUrl: config.apiUrl ?? apiUrl });
@@ -161,7 +164,8 @@ async function login() {
     console.log("Saved OPENCMS_CLERK_TOKEN for local CLI use.");
     return;
   }
-  await ensureToken(config);
+  const loggedInToken = await browserLogin();
+  await writeConfig({ ...config, token: loggedInToken, apiUrl: config.apiUrl ?? apiUrl });
   console.log("Logged in to OpenCMS.");
 }
 
@@ -262,7 +266,13 @@ async function createProject() {
 async function runDev() {
   const config = await readConfig();
   await ensureToken(config);
-  await syncLocalSchema(await projectIdFromEnv(), await readConfig());
+  try {
+    await syncLocalSchema(await projectIdFromEnv(), await readConfig());
+  } catch (error) {
+    if (!(error instanceof OpenCmsApiError) || error.status !== 401) throw error;
+    await reauthenticate(await readConfig());
+    await syncLocalSchema(await projectIdFromEnv(), await readConfig());
+  }
   const manager = await packageManager(process.cwd());
   const command = manager[0] === "npm" ? ["npm", "run", "dev"] : manager[0] === "pnpm" ? ["pnpm", "dev"] : manager[0] === "yarn" ? ["yarn", "dev"] : ["bun", "run", "dev"];
   process.exit(await runCommand(command[0], command.slice(1), { cwd: process.cwd(), env: { ...process.env, OPENCMS_ENVIRONMENT: "development" }, inherit: true }));
@@ -298,8 +308,16 @@ async function deploy() {
   await ensureToken(config);
   const projectId = (await projectIdFromEnv()) ?? config.projectId;
   if (!projectId) throw new Error("No OpenCMS project is configured in this directory.");
-  await syncLocalSchema(projectId, await readConfig());
-  const deployment = await sdk(await readConfig()).deploy(projectId);
+  let deployment;
+  try {
+    await syncLocalSchema(projectId, await readConfig());
+    deployment = await sdk(await readConfig()).deploy(projectId);
+  } catch (error) {
+    if (!(error instanceof OpenCmsApiError) || error.status !== 401) throw error;
+    await reauthenticate(await readConfig());
+    await syncLocalSchema(projectId, await readConfig());
+    deployment = await sdk(await readConfig()).deploy(projectId);
+  }
   console.log(`Deployed ${deployment.sourceEnvironment} content to ${deployment.targetEnvironment}.`);
   if (process.env.VERCEL_TOKEN) {
     console.log("Deploying the application to Vercel…");
