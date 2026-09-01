@@ -22,6 +22,7 @@ const dashboardUrl = process.env.OPENCMS_DASHBOARD_URL ?? hostedUrl;
 const apiUrl = process.env.OPENCMS_API_URL ?? hostedUrl;
 const configRoot = process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config");
 const configPath = join(configRoot, "opencms", "config.json");
+const legacyLocalApiUrl = "http://localhost:3000";
 
 interface CliConfig {
   token?: string;
@@ -47,9 +48,15 @@ function tokenFor(config: CliConfig) {
   return process.env.OPENCMS_CLERK_TOKEN ?? config.token ?? null;
 }
 
+function apiUrlFor(config?: CliConfig) {
+  if (process.env.OPENCMS_API_URL) return process.env.OPENCMS_API_URL;
+  if (config?.apiUrl && config.apiUrl !== legacyLocalApiUrl) return config.apiUrl;
+  return apiUrl;
+}
+
 function sdk(config: CliConfig, projectId?: string) {
   return createSdk({
-    baseUrl: process.env.OPENCMS_API_URL ?? config.apiUrl ?? apiUrl,
+    baseUrl: apiUrlFor(config),
     projectId,
     getToken: () => tokenFor(config),
   });
@@ -143,7 +150,7 @@ async function ensureToken(config: CliConfig) {
   const token = tokenFor(config);
   if (token) return token;
   const loggedInToken = await browserLogin();
-  await writeConfig({ ...config, token: loggedInToken, apiUrl: config.apiUrl ?? apiUrl });
+  await writeConfig({ ...config, token: loggedInToken, apiUrl: apiUrlFor(config) });
   return loggedInToken;
 }
 
@@ -153,19 +160,19 @@ async function reauthenticate(config: CliConfig) {
   }
   console.log("Your OpenCMS session has expired. Opening browser login…");
   const loggedInToken = await browserLogin();
-  await writeConfig({ ...config, token: loggedInToken, apiUrl: config.apiUrl ?? apiUrl });
+  await writeConfig({ ...config, token: loggedInToken, apiUrl: apiUrlFor(config) });
   return loggedInToken;
 }
 
 async function login() {
   const config = await readConfig();
   if (process.env.OPENCMS_CLERK_TOKEN) {
-    await writeConfig({ ...config, token: process.env.OPENCMS_CLERK_TOKEN, apiUrl: config.apiUrl ?? apiUrl });
+    await writeConfig({ ...config, token: process.env.OPENCMS_CLERK_TOKEN, apiUrl: apiUrlFor(config) });
     console.log("Saved OPENCMS_CLERK_TOKEN for local CLI use.");
     return;
   }
   const loggedInToken = await browserLogin();
-  await writeConfig({ ...config, token: loggedInToken, apiUrl: config.apiUrl ?? apiUrl });
+  await writeConfig({ ...config, token: loggedInToken, apiUrl: apiUrlFor(config) });
   console.log("Logged in to OpenCMS.");
 }
 
@@ -252,7 +259,7 @@ async function createProject() {
   }
   const destination = resolve(process.cwd(), slugify(project.name));
   await pullTemplate(destination);
-  const baseUrl = process.env.OPENCMS_API_URL ?? config.apiUrl ?? apiUrl;
+  const baseUrl = apiUrlFor(config);
   await writeProjectEnv(destination, project, baseUrl);
   await ensureCmsDirectory(destination, project, baseUrl);
   await installDependencies(destination);
@@ -275,7 +282,15 @@ async function runDev() {
   }
   const manager = await packageManager(process.cwd());
   const command = manager[0] === "npm" ? ["npm", "run", "dev"] : manager[0] === "pnpm" ? ["pnpm", "dev"] : manager[0] === "yarn" ? ["yarn", "dev"] : ["bun", "run", "dev"];
-  process.exit(await runCommand(command[0], command.slice(1), { cwd: process.cwd(), env: { ...process.env, OPENCMS_ENVIRONMENT: "development" }, inherit: true }));
+  process.exit(await runCommand(command[0], command.slice(1), {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      OPENCMS_API_URL: apiUrlFor(await readConfig()),
+      OPENCMS_ENVIRONMENT: "development",
+    },
+    inherit: true,
+  }));
 }
 
 async function syncLocalSchema(projectId: string | undefined, config: CliConfig) {

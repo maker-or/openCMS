@@ -1,6 +1,6 @@
 {
   "name": "@maker-or/opencms",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "The developer-first CLI for OpenCMS",
   "type": "module",
   "repository": {
