@@ -213,7 +213,9 @@ function PageList({
             {environment} pages
           </h2>
         </div>
-        <DialogTrigger render={<Button leadingIcon={Plus}>Add page</Button>} />
+        {environment === "development" && (
+          <DialogTrigger render={<Button leadingIcon={Plus}>Add page</Button>} />
+        )}
       </div>
 
       {isLoading ? (
@@ -227,7 +229,9 @@ function PageList({
           <CardHeader className="flex min-h-64 items-center justify-center text-center">
             <CardTitle className="text-lg">No pages yet</CardTitle>
             <CardDescription className="mt-2 max-w-sm">
-              Add a page to start building this environment’s content.
+              {environment === "development"
+                ? "Add a page to start building this environment’s content."
+                : "Deploy published development pages to populate production."}
             </CardDescription>
           </CardHeader>
         </Card>
@@ -308,12 +312,14 @@ export function BlockEditor({
   schema,
   contentType = "page",
   errors = {},
+  readOnly = false,
   onChange,
 }: {
   blocks: ContentBlock[];
   schema: OpenCmsSchema;
   contentType?: string;
   errors?: Record<string, string>;
+  readOnly?: boolean;
   onChange: (blocks: ContentBlock[]) => void;
 }) {
   const shape = useShape();
@@ -336,11 +342,7 @@ export function BlockEditor({
   return (
     <section className="space-y-3">
       <div className="flex items-end justify-between gap-4">
-        <div>
-          <p className="text-[12px] font-medium uppercase tracking-[0.16em] text-muted-foreground">Page body</p>
-          <p className="mt-1 text-[12px] text-muted-foreground">Compose the page from structured blocks.</p>
-        </div>
-        <div className="flex flex-wrap justify-end gap-1.5">
+        {!readOnly && <div className="flex flex-wrap justify-end gap-1.5">
           {allowedBlocks.map((type) => (
             <Button
               key={type}
@@ -352,7 +354,7 @@ export function BlockEditor({
               + {schema.blocks[type]?.label ?? type}
             </Button>
           ))}
-        </div>
+        </div>}
       </div>
 
       {blocks.length === 0 ? (
@@ -368,12 +370,12 @@ export function BlockEditor({
               <div key={block.id} className={`space-y-3 border border-border bg-surface-2 p-3 ${shape.container}`}>
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-[13px] font-medium text-foreground">{definition.label}</p>
-                  <div className="flex items-center gap-1">
+                  {!readOnly && <div className="flex items-center gap-1">
                     <Button type="button" size="icon-compact" variant="ghost" disabled={index === 0} onClick={() => moveBlock(index, -1)} aria-label="Move block up">↑</Button>
                     <Button type="button" size="icon-compact" variant="ghost" disabled={index === blocks.length - 1} onClick={() => moveBlock(index, 1)} aria-label="Move block down">↓</Button>
                     <Button type="button" size="compact" variant="ghost" onClick={() => onChange([...blocks.slice(0, index + 1), { ...block, id: createBlock(block.type, schema).id, data: { ...block.data } }, ...blocks.slice(index + 1)])}>Duplicate</Button>
                     <Button type="button" size="compact" variant="ghost" onClick={() => onChange(blocks.filter((item) => item.id !== block.id))}>Remove</Button>
-                  </div>
+                  </div>}
                 </div>
                 {errors[block.id] && <p className="text-[11px] text-destructive">{errors[block.id]}</p>}
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -387,6 +389,7 @@ export function BlockEditor({
                           {label}
                           <input
                             type="number"
+                            disabled={readOnly}
                             value={typeof value === "number" ? value : ""}
                             onChange={(event) => updateBlock(block.id, fieldName, Number(event.target.value))}
                             aria-invalid={!!error}
@@ -401,6 +404,7 @@ export function BlockEditor({
                         <label key={fieldName} className="flex items-center gap-2 text-[12px] text-muted-foreground sm:col-span-2">
                           <input
                             type="checkbox"
+                            disabled={readOnly}
                             checked={value === true}
                             onChange={(event) => updateBlock(block.id, fieldName, event.target.checked)}
                             className="size-4 accent-foreground"
@@ -414,6 +418,7 @@ export function BlockEditor({
                       <label key={fieldName} className="flex flex-col gap-1 text-[12px] text-muted-foreground sm:col-span-2">
                         {label}
                         <textarea
+                          disabled={readOnly}
                           value={typeof value === "string" ? value : ""}
                           onChange={(event) => updateBlock(block.id, fieldName, event.target.value)}
                           placeholder={label}
@@ -558,6 +563,14 @@ export default function ProjectClient({ projectId }: { projectId: string }) {
     }
   }
 
+  function changeEnvironment(nextEnvironment: Environment) {
+    setShowPageDialog(false);
+    setSaveError(null);
+    setFormErrors({});
+    setMessage(null);
+    setEnvironment(nextEnvironment);
+  }
+
   return (
     <>
       <Show when="signed-out"><SignInRequired /></Show>
@@ -574,7 +587,7 @@ export default function ProjectClient({ projectId }: { projectId: string }) {
                   <h3 className="mt-3 text-4xl font-semibold tracking-[-0.05em] text-foreground">Content</h3>
                 </div>
                 <div className="mt-8 self-start">
-                  <EnvironmentTabs environment={environment} onChange={setEnvironment} />
+                  <EnvironmentTabs environment={environment} onChange={changeEnvironment} />
                 </div>
               </header>
 

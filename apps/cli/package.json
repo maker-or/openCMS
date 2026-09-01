@@ -1,6 +1,6 @@
 {
   "name": "@maker-or/opencms",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "The developer-first CLI for OpenCMS",
   "type": "module",
   "repository": {
@@ -28,6 +28,7 @@
     "build": "bun build src/index.ts --outfile dist/index.js --target=node --format=esm",
     "dev": "bun --watch src/index.ts",
     "start": "node dist/index.js",
+    "test": "bun run build && bun test",
     "typecheck": "tsc --noEmit",
     "prepack": "bun run build"
   },
@@ -35,6 +36,7 @@
     "node": ">=20"
   },
   "devDependencies": {
+    "@types/bun": "latest",
     "@types/node": "^22.13.10",
     "typescript": "^5.8.3"
   }

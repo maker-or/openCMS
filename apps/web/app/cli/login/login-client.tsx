@@ -10,23 +10,36 @@ export default function CliLoginClient() {
   const { getToken, isLoaded } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const redirectUri = params.get("redirect_uri");
+  const state = params.get("state");
 
   useEffect(() => {
     if (!isLoaded || !redirectUri) return;
     let cancelled = false;
-    void getToken().then((token) => {
+    void getToken().then(async (sessionToken) => {
       if (cancelled) return;
-      if (!token) { setError("We could not create a CLI session."); return; }
+      if (!sessionToken) { setError("We could not create a CLI session."); return; }
       const callback = new URL(redirectUri);
-      if (callback.hostname !== "127.0.0.1" && callback.hostname !== "localhost") {
-        setError("The CLI callback must point to localhost.");
+      const localHostname = callback.hostname === "127.0.0.1" || callback.hostname === "localhost";
+      if (callback.protocol !== "http:" || !localHostname || callback.username || callback.password) {
+        setError("The CLI callback must be a plain HTTP localhost URL.");
         return;
       }
-      callback.searchParams.set("token", token);
+      const response = await fetch("/api/cli/tokens", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${sessionToken}` },
+      });
+      const result = await response.json() as { token?: string; error?: string };
+      if (cancelled) return;
+      if (!response.ok || !result.token) {
+        setError(result.error ?? "We could not create a CLI session.");
+        return;
+      }
+      callback.searchParams.set("token", result.token);
+      if (state) callback.searchParams.set("state", state);
       window.location.assign(callback.toString());
     }).catch(() => setError("We could not create a CLI session."));
     return () => { cancelled = true; };
-  }, [getToken, isLoaded, redirectUri]);
+  }, [getToken, isLoaded, redirectUri, state]);
 
   return (
     <main

@@ -6,6 +6,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   createContext,
   useContext,
   forwardRef,
@@ -172,16 +173,16 @@ const TabsList = forwardRef<HTMLDivElement, TabsListProps>(
     const valueOrderCtx = useContext(TabsValueOrderContext);
     const [optimisticIdx, setOptimisticIdx] = useState<number | null>(null);
 
-    const values = Children.toArray(children)
+    const values = useMemo(() => Children.toArray(children)
       .filter(isValidElement)
       .map((child) => (child.props as { value?: string }).value)
-      .filter((v): v is string => typeof v === "string");
+      .filter((v): v is string => typeof v === "string"), [children]);
     const valueOrderKey = values.join(",");
     const setValueOrder = valueOrderCtx?.setValueOrder;
 
     useLayoutEffect(() => {
       setValueOrder?.(values);
-    }, [setValueOrder, valueOrderKey]);
+    }, [setValueOrder, valueOrderKey, values]);
 
     const {
       activeIndex: hoveredIndex,

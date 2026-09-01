@@ -28,12 +28,18 @@ export type {
   ContentBlock,
   OpenCmsSchema,
   PageContent,
+  SchemaContentRecord,
   SchemaBlock,
   SchemaContentType,
   SchemaField,
   SchemaFieldType,
 } from "./schema";
-export { defaultSchema, emptyPageContent } from "./schema";
+export {
+  defaultSchema,
+  emptyPageContent,
+  validatePageContent,
+  validateSchemaCompatibility,
+} from "./schema";
 
 export interface OpenCmsSdkOptions {
   baseUrl?: string;
@@ -109,15 +115,19 @@ export function createSdk(options: OpenCmsSdkOptions = {}) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(input),
         }),
+      delete: (targetProjectId: string) =>
+        request<{ deleted: true }>(`/api/projects/${targetProjectId}`, {
+          method: "DELETE",
+        }),
     },
     schema: {
       get: () => {
         if (!projectId) throw new Error("projectId is required to get the schema");
-        return request<OpenCmsSchema>(`/api/projects/${projectId}/schema`);
+        return request<OpenCmsSchema>(`/api/projects/${projectId}/schema?environment=${environment}`);
       },
       update: (schema: OpenCmsSchema) => {
         if (!projectId) throw new Error("projectId is required to update the schema");
-        return request<OpenCmsSchema>(`/api/projects/${projectId}/schema`, {
+        return request<OpenCmsSchema>(`/api/projects/${projectId}/schema?environment=${environment}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(schema),

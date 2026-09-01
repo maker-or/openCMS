@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
 import { createServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { access, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline/promises";
@@ -16,6 +17,7 @@ import {
   type OpenCmsSchema,
   type Project,
 } from "../../../packages/sdk/src/index";
+import { vercelDeploymentArgs } from "./vercel";
 
 const configRoot = process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config");
 const configPath = join(configRoot, "opencms", "config.json");
@@ -36,8 +38,13 @@ async function readConfig(): Promise<CliConfig> {
 }
 
 async function writeConfig(config: CliConfig) {
-  await mkdir(join(configRoot, "opencms"), { recursive: true });
-  await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  const directory = join(configRoot, "opencms");
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  if (process.platform !== "win32") {
+    await chmod(directory, 0o700);
+    await chmod(configPath, 0o600);
+  }
 }
 
 function tokenFor(config: CliConfig) {
@@ -113,6 +120,7 @@ async function openBrowser(url: string) {
 }
 
 async function browserLogin(config: CliConfig) {
+  const loginState = randomUUID();
   let resolveToken: (token: string) => void = () => undefined;
   let rejectLogin: (error: Error) => void = () => undefined;
   const tokenPromise = new Promise<string>((resolve, reject) => {
@@ -127,14 +135,24 @@ async function browserLogin(config: CliConfig) {
       response.end("Waiting for opencms login.");
       return;
     }
+    if (url.searchParams.get("state") !== loginState) {
+      response.writeHead(400, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
+      response.end("Invalid login state.");
+      return;
+    }
     const token = url.searchParams.get("token");
     if (!token) {
-      response.writeHead(400, { "Content-Type": "text/plain" });
+      response.writeHead(400, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
       response.end("Missing login token.");
       return;
     }
     resolveToken(token);
-    response.writeHead(200, { "Content-Type": "text/html" });
+    response.writeHead(200, {
+      "Content-Type": "text/html",
+      "Cache-Control": "no-store",
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+      "X-Content-Type-Options": "nosniff",
+    });
     response.end("<h1>OpenCMS login complete</h1><p>You can close this window.</p>");
   });
 
@@ -145,7 +163,7 @@ async function browserLogin(config: CliConfig) {
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Unable to start the login callback server.");
   const callback = `http://127.0.0.1:${address.port}/callback`;
-  const loginUrl = `${dashboardUrlFor(config)}/cli/login?redirect_uri=${encodeURIComponent(callback)}`;
+  const loginUrl = `${dashboardUrlFor(config)}/cli/login?redirect_uri=${encodeURIComponent(callback)}&state=${encodeURIComponent(loginState)}`;
   console.log(`Opening ${loginUrl}`);
   try {
     await openBrowser(loginUrl);
@@ -180,6 +198,18 @@ async function reauthenticate(config: CliConfig) {
   return loggedInToken;
 }
 
+async function withReauthentication<T>(operation: (config: CliConfig) => Promise<T>) {
+  let config = await readConfig();
+  try {
+    return await operation(config);
+  } catch (error) {
+    if (!(error instanceof OpenCmsApiError) || error.status !== 401) throw error;
+    await reauthenticate(config);
+    config = await readConfig();
+    return operation(config);
+  }
+}
+
 async function login() {
   const config = await readConfig();
   if (process.env.OPENCMS_CLERK_TOKEN) {
@@ -194,6 +224,17 @@ async function login() {
 
 async function logout() {
   const config = await readConfig();
+  if (config.token?.startsWith("ocms_")) {
+    try {
+      const response = await fetch(`${apiUrlFor(config)}/api/cli/tokens/current`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${config.token}` },
+      });
+      if (!response.ok) console.warn("OpenCMS: The remote CLI session could not be revoked.");
+    } catch {
+      console.warn("OpenCMS: The remote CLI session could not be revoked.");
+    }
+  }
   const { token: _token, ...withoutToken } = config;
   await writeConfig(withoutToken);
   console.log("Logged out of OpenCMS.");
@@ -261,6 +302,8 @@ async function createProject() {
   await ensureToken(config);
   const name = await ask("Project name: ");
   if (!name) throw new Error("A project name is required.");
+  const destination = resolve(process.cwd(), slugify(name));
+  if (await fileExists(destination)) throw new Error(`Destination already exists: ${destination}`);
   let currentConfig = await readConfig();
   let client = sdk(currentConfig);
   let project: Project;
@@ -273,12 +316,21 @@ async function createProject() {
     client = sdk(currentConfig);
     project = await client.projects.create({ name });
   }
-  const destination = resolve(process.cwd(), slugify(project.name));
-  await pullTemplate(destination);
-  const baseUrl = apiUrlFor(config);
-  await writeProjectEnv(destination, project, baseUrl);
-  await ensureCmsDirectory(destination, project, baseUrl);
-  await installDependencies(destination);
+  const baseUrl = apiUrlFor(currentConfig);
+  try {
+    await pullTemplate(destination);
+    await writeProjectEnv(destination, project, baseUrl);
+    await ensureCmsDirectory(destination, project, baseUrl);
+    await installDependencies(destination);
+  } catch (error) {
+    await rm(destination, { recursive: true, force: true });
+    try {
+      await client.projects.delete(project.id);
+    } catch {
+      console.error(`OpenCMS: Local setup failed and cloud rollback also failed. Project ID: ${project.id}`);
+    }
+    throw error;
+  }
   await writeConfig({ ...(await readConfig()), projectId: project.id, apiUrl: baseUrl });
   console.log(`\nCreated ${project.name}.`);
   console.log(`Project ID: ${project.id}`);
@@ -289,13 +341,8 @@ async function createProject() {
 async function runDev() {
   const config = await readConfig();
   await ensureToken(config);
-  try {
-    await syncLocalSchema(await projectIdFromEnv(), await readConfig());
-  } catch (error) {
-    if (!(error instanceof OpenCmsApiError) || error.status !== 401) throw error;
-    await reauthenticate(await readConfig());
-    await syncLocalSchema(await projectIdFromEnv(), await readConfig());
-  }
+  const projectId = await projectIdFromEnv();
+  await withReauthentication((currentConfig) => syncLocalSchema(projectId, currentConfig));
   const manager = await packageManager(process.cwd());
   const script = await nextDevScript(process.cwd());
   const command = manager[0] === "npm"
@@ -366,23 +413,22 @@ async function deploy() {
   await ensureToken(config);
   const projectId = (await projectIdFromEnv()) ?? config.projectId;
   if (!projectId) throw new Error("No OpenCMS project is configured in this directory.");
-  let deployment;
-  try {
-    await syncLocalSchema(projectId, await readConfig());
-    deployment = await sdk(await readConfig()).deploy(projectId);
-  } catch (error) {
-    if (!(error instanceof OpenCmsApiError) || error.status !== 401) throw error;
-    await reauthenticate(await readConfig());
-    await syncLocalSchema(projectId, await readConfig());
-    deployment = await sdk(await readConfig()).deploy(projectId);
-  }
-  console.log(`Deployed ${deployment.sourceEnvironment} content to ${deployment.targetEnvironment}.`);
+  await withReauthentication((currentConfig) => syncLocalSchema(projectId, currentConfig));
   if (process.env.VERCEL_TOKEN) {
     console.log("Deploying the application to Vercel…");
-    if (await runCommand("npx", ["vercel", "--prod", "--yes", "--token", process.env.VERCEL_TOKEN], { cwd: process.cwd(), inherit: true }) !== 0) {
+    const args = vercelDeploymentArgs({
+      apiUrl: apiUrlFor(await readConfig()),
+      projectId,
+      token: process.env.VERCEL_TOKEN,
+    });
+    if (await runCommand("npx", args, { cwd: process.cwd(), inherit: true }) !== 0) {
       throw new Error("Vercel deployment failed.");
     }
   }
+  const deployment = await withReauthentication((currentConfig) => (
+    sdk(currentConfig).deploy(projectId)
+  ));
+  console.log(`Deployed ${deployment.sourceEnvironment} content to ${deployment.targetEnvironment}.`);
 }
 
 function printHelp() {

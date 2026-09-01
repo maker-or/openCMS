@@ -3,8 +3,12 @@ import { drizzle } from "drizzle-orm/neon-http";
 
 import * as schema from "./schema";
 
-export { contentSchemas, deployments, documents, projects } from "./schema";
+export { cliTokens, contentSchemas, deployments, documents, projects } from "./schema";
+export { createCliToken, hashCliToken } from "./cli-token";
+export { createDeploymentPlan, deployProject } from "./deployment";
+export type { DeploymentPlan, ProductionDocumentWrite } from "./deployment";
 export type {
+  CliToken,
   ContentSchema,
   Deployment,
   Document,

@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useSyncExternalStore, type ReactNode } from "react";
 import { Moon, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -16,22 +16,37 @@ function applyTheme(theme: Theme) {
 
 const ThemeContext = createContext<{ theme: Theme; toggleTheme: () => void } | null>(null);
 
+function currentTheme(): Theme {
+  const stored = window.localStorage.getItem(THEME_KEY);
+  if (stored === "dark" || stored === "light") return stored;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function subscribeToTheme(onStoreChange: () => void) {
+  const media = window.matchMedia("(prefers-color-scheme: dark)");
+  const notify = () => onStoreChange();
+  window.addEventListener("opencms-theme-change", notify);
+  window.addEventListener("storage", notify);
+  media.addEventListener("change", notify);
+  return () => {
+    window.removeEventListener("opencms-theme-change", notify);
+    window.removeEventListener("storage", notify);
+    media.removeEventListener("change", notify);
+  };
+}
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>("light");
+  const theme = useSyncExternalStore<Theme>(subscribeToTheme, currentTheme, () => "light");
 
   useEffect(() => {
-    const stored = window.localStorage.getItem(THEME_KEY);
-    const systemTheme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-    const nextTheme: Theme = stored === "dark" || stored === "light" ? stored : systemTheme;
-    setTheme(nextTheme);
-    applyTheme(nextTheme);
-  }, []);
+    applyTheme(theme);
+  }, [theme]);
 
   function toggleTheme() {
     const nextTheme: Theme = theme === "light" ? "dark" : "light";
-    setTheme(nextTheme);
     window.localStorage.setItem(THEME_KEY, nextTheme);
     applyTheme(nextTheme);
+    window.dispatchEvent(new Event("opencms-theme-change"));
   }
 
   return <ThemeContext.Provider value={{ theme, toggleTheme }}>{children}</ThemeContext.Provider>;

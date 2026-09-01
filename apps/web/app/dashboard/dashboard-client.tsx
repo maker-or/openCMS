@@ -1,10 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Show, SignInButton, useAuth } from "@clerk/nextjs";
-import { ArrowRight } from "lucide-react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { AddCircleIcon } from "@hugeicons/core-free-icons";
 import type { IconComponentProps } from "@/lib/icon-context";
@@ -13,7 +11,6 @@ import {
   Dialog,
   DialogClose,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -23,7 +20,6 @@ import { InputField, InputGroup } from "@/components/ui/input-group";
 import {
   Card,
   CardDescription,
-  CardFooter,
   CardGroup,
   CardHeader,
   CardMedia,
@@ -114,11 +110,13 @@ function DashboardLoading() {
 
 function CreateProjectDialog({
   name,
+  error,
   isCreating,
   onNameChange,
   onSubmit,
 }: {
   name: string;
+  error: string | null;
   isCreating: boolean;
   onNameChange: (name: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -130,6 +128,11 @@ function CreateProjectDialog({
 
       </DialogHeader>
       <form onSubmit={onSubmit}>
+        {error && (
+          <div role="alert" className="mb-4 border border-destructive/20 bg-destructive-light/60 px-4 py-3 text-sm text-destructive">
+            {error}
+          </div>
+        )}
         <InputGroup className="w-full">
           <InputField
             index={0}
@@ -142,7 +145,7 @@ function CreateProjectDialog({
         </InputGroup>
         <DialogFooter>
           <DialogClose render={<Button variant="ghost">Cancel</Button>} />
-          <Button type="submit" loading={isCreating} disabled={!name.trim()}>
+          <Button type="submit" loading={isCreating} disabled={isCreating || !name.trim()}>
             Create project
           </Button>
         </DialogFooter>
@@ -151,12 +154,31 @@ function CreateProjectDialog({
   );
 }
 
+function DashboardError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <DashboardFrame>
+      <div className="mx-auto flex min-h-[55vh] max-w-lg items-center justify-center">
+        <CardGroup orientation="inline" border="outlined" className="w-full bg-surface-2 p-4 shadow-surface-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>Unable to load projects</CardTitle>
+              <CardDescription>{message}</CardDescription>
+              <Button className="mt-5 self-start" onClick={onRetry}>Try again</Button>
+            </CardHeader>
+          </Card>
+        </CardGroup>
+      </div>
+    </DashboardFrame>
+  );
+}
+
 export default function DashboardClient() {
   const { getToken, isLoaded } = useAuth();
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [name, setName] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -166,9 +188,9 @@ export default function DashboardClient() {
     setIsLoading(true);
     try {
       setProjects(await api.projects.list());
-      setError(null);
+      setLoadError(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to load projects");
+      setLoadError(cause instanceof Error ? cause.message : "Unable to load projects");
     } finally {
       setIsLoading(false);
     }
@@ -182,11 +204,12 @@ export default function DashboardClient() {
     event.preventDefault();
     if (!name.trim()) return;
     setIsCreating(true);
+    setCreateError(null);
     try {
       const project = await api.projects.create({ name });
       router.push(`/dashboard/${project.id}`);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to create project");
+      setCreateError(cause instanceof Error ? cause.message : "Unable to create project");
     } finally {
       setIsCreating(false);
     }
@@ -196,9 +219,14 @@ export default function DashboardClient() {
     <>
       <Show when="signed-out"><SignInRequired /></Show>
       <Show when="signed-in">
-        <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+        <Dialog open={showCreateDialog} onOpenChange={(open) => {
+          setShowCreateDialog(open);
+          if (!open) setCreateError(null);
+        }}>
           {isLoading ? (
             <DashboardLoading />
+          ) : loadError && projects.length === 0 ? (
+            <DashboardError message={loadError} onRetry={() => void loadProjects()} />
           ) : projects.length === 0 ? (
             <EmptyWorkspace />
           ) : (
@@ -213,7 +241,7 @@ export default function DashboardClient() {
                   <DialogTrigger render={<Button trailingIcon={CreateProjectIcon}>New project</Button>} />
                 </header>
 
-                {error && <div className="border border-destructive/20 bg-destructive-light/60 px-4 py-3 text-sm text-destructive">{error}</div>}
+                {loadError && <div role="alert" className="border border-destructive/20 bg-destructive-light/60 px-4 py-3 text-sm text-destructive">{loadError}</div>}
                 <CardGroup orientation="inline" border="outlined" className="mx-auto w-full max-w-2xl bg-surface-2 p-4 shadow-surface-2">
                   {projects.map((project) => (
                     <Card key={project.id} href={`/dashboard/${project.id}`} label={`Open ${project.name}`}>
@@ -231,6 +259,7 @@ export default function DashboardClient() {
           )}
           <CreateProjectDialog
             name={name}
+            error={createError}
             isCreating={isCreating}
             onNameChange={setName}
             onSubmit={createProject}

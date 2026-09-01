@@ -1,5 +1,6 @@
 import {
   integer,
+  index,
   jsonb,
   pgTable,
   text,
@@ -30,6 +31,23 @@ export const projects = pgTable(
   (table) => [uniqueIndex("projects_owner_slug_idx").on(table.ownerId, table.slug)],
 );
 
+export const cliTokens = pgTable(
+  "cli_tokens",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("cli_tokens_hash_idx").on(table.tokenHash),
+    index("cli_tokens_owner_idx").on(table.ownerId),
+  ],
+);
+
 export const contentSchemas = pgTable(
   "content_schemas",
   {
@@ -38,6 +56,10 @@ export const contentSchemas = pgTable(
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
     ownerId: text("owner_id").notNull(),
+    environment: text("environment")
+      .$type<Environment>()
+      .notNull()
+      .default("development"),
     version: integer("version").notNull().default(1),
     schema: jsonb("schema").$type<JsonObject>().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -47,7 +69,10 @@ export const contentSchemas = pgTable(
       .defaultNow()
       .notNull(),
   },
-  (table) => [uniqueIndex("content_schemas_project_idx").on(table.projectId)],
+  (table) => [uniqueIndex("content_schemas_project_environment_idx").on(
+    table.projectId,
+    table.environment,
+  )],
 );
 
 export const documents = pgTable("documents", {
@@ -110,3 +135,4 @@ export type NewContentSchema = typeof contentSchemas.$inferInsert;
 export type Project = typeof projects.$inferSelect;
 export type NewProject = typeof projects.$inferInsert;
 export type Deployment = typeof deployments.$inferSelect;
+export type CliToken = typeof cliTokens.$inferSelect;

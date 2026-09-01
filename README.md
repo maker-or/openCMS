@@ -82,9 +82,19 @@ After creating a project, edit `cms/schema.json` in the generated Next.js applic
 }
 ```
 
-The supported field types are `text`, `slug`, `number`, and `boolean`. Run `npx @maker-or/opencms dev` after changing the file to sync it to development. The dashboard then uses that schema when creating pages, and each page is stored as JSON with an ordered `blocks` array.
+The supported field types are `text`, `slug`, `number`, and `boolean`. Run `npx @maker-or/opencms dev` after changing the file to sync it to development. Development and production schemas are isolated: an incompatible development schema is rejected while pages still use removed blocks, and `deploy` promotes the development schema with the published page snapshot. The dashboard uses the selected environment's schema when reading pages, and each page is stored as JSON with an ordered `blocks` array.
 
-Set `VERCEL_TOKEN` when `opencms deploy` should also run the Vercel production deployment for the current application. Without it, deploy promotes CMS content only.
+Set `VERCEL_TOKEN` when `opencms deploy` should also run the Vercel production deployment for the current application. The CLI supplies the OpenCMS project ID, API origin, and production environment to both the Vercel build and runtime. Without `VERCEL_TOKEN`, deploy promotes published development content to the read-only production environment but does not deploy the Next.js application.
+
+## Release checks
+
+Run the same gate used by CI before pushing:
+
+```bash
+bun run check
+```
+
+This runs lint with zero warnings, package tests, all TypeScript checks, and the production dashboard build. Set `TEST_DATABASE_URL` to an isolated Neon database to include the deployment integration test.
 
 ## Database commands
 

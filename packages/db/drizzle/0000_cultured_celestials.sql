@@ -1,4 +1,6 @@
-CREATE TABLE "content_schemas" (
+-- Keep the baseline idempotent so databases created with `drizzle-kit push`
+-- before migrations were introduced can adopt the migration journal safely.
+CREATE TABLE IF NOT EXISTS "content_schemas" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"project_id" uuid NOT NULL,
 	"owner_id" text NOT NULL,
@@ -8,7 +10,7 @@ CREATE TABLE "content_schemas" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "deployments" (
+CREATE TABLE IF NOT EXISTS "deployments" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"project_id" uuid NOT NULL,
 	"owner_id" text NOT NULL,
@@ -17,7 +19,7 @@ CREATE TABLE "deployments" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "documents" (
+CREATE TABLE IF NOT EXISTS "documents" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"project_id" uuid NOT NULL,
 	"owner_id" text NOT NULL,
@@ -32,7 +34,7 @@ CREATE TABLE "documents" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "projects" (
+CREATE TABLE IF NOT EXISTS "projects" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"owner_id" text NOT NULL,
 	"name" text NOT NULL,
@@ -41,9 +43,18 @@ CREATE TABLE "projects" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-ALTER TABLE "content_schemas" ADD CONSTRAINT "content_schemas_project_id_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "deployments" ADD CONSTRAINT "deployments_project_id_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "documents" ADD CONSTRAINT "documents_project_id_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-CREATE UNIQUE INDEX "content_schemas_project_idx" ON "content_schemas" USING btree ("project_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "documents_project_environment_slug_idx" ON "documents" USING btree ("project_id","environment","slug");--> statement-breakpoint
-CREATE UNIQUE INDEX "projects_owner_slug_idx" ON "projects" USING btree ("owner_id","slug");
+DO $$
+BEGIN
+	IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'content_schemas_project_id_projects_id_fk') THEN
+		ALTER TABLE "content_schemas" ADD CONSTRAINT "content_schemas_project_id_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE cascade ON UPDATE no action;
+	END IF;
+	IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'deployments_project_id_projects_id_fk') THEN
+		ALTER TABLE "deployments" ADD CONSTRAINT "deployments_project_id_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE cascade ON UPDATE no action;
+	END IF;
+	IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'documents_project_id_projects_id_fk') THEN
+		ALTER TABLE "documents" ADD CONSTRAINT "documents_project_id_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE cascade ON UPDATE no action;
+	END IF;
+END $$;--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "content_schemas_project_idx" ON "content_schemas" USING btree ("project_id");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "documents_project_environment_slug_idx" ON "documents" USING btree ("project_id","environment","slug");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "projects_owner_slug_idx" ON "projects" USING btree ("owner_id","slug");

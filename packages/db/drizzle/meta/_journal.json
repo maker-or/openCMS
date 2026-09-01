@@ -15,6 +15,20 @@
       "when": 1788210765000,
       "tag": "0001_upgrade_legacy_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788259733269,
+      "tag": "0002_yummy_the_initiative",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788280186354,
+      "tag": "0003_cool_sentinels",
+      "breakpoints": true
     }
   ]
 }

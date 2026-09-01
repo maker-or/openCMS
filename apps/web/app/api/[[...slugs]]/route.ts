@@ -1,15 +1,18 @@
 import { randomUUID } from "node:crypto";
 
 import { clerkClient } from "@clerk/nextjs/server";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, gt, lt } from "drizzle-orm";
 import { Elysia, t } from "elysia";
 
 import {
+  cliTokens,
   contentSchemas,
+  createCliToken,
   createDb,
-  deployments,
+  deployProject,
   documents,
   projects,
+  hashCliToken,
   type Environment,
   type JsonObject,
 } from "@opencms/db";
@@ -17,9 +20,10 @@ import {
   defaultSchema,
   emptyPageContent,
   type DocumentStatus,
-  type SchemaField,
   type OpenCmsSchema,
   type PageContent,
+  validatePageContent,
+  validateSchemaCompatibility,
 } from "@opencms/sdk";
 
 export const runtime = "nodejs";
@@ -29,17 +33,25 @@ const environments = ["development", "production"] as const;
 const fieldTypes = ["text", "slug", "number", "boolean"] as const;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-async function getUserId(request: Request) {
+function bearerToken(request: Request) {
+  const authorization = request.headers.get("Authorization");
+  return authorization?.startsWith("Bearer ") ? authorization.slice(7).trim() : null;
+}
+
+async function getClerkUserId(request: Request) {
   if (!process.env.CLERK_SECRET_KEY || !process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
     return null;
   }
 
   try {
     const client = await clerkClient();
+    const requestOrigin = new URL(request.url).origin;
+    const authorizedParties = Array.from(new Set([
+      requestOrigin,
+      ...(process.env.NEXT_PUBLIC_APP_URL ? [process.env.NEXT_PUBLIC_APP_URL] : []),
+    ]));
     const state = await client.authenticateRequest(request, {
-      authorizedParties: process.env.NEXT_PUBLIC_APP_URL
-        ? [process.env.NEXT_PUBLIC_APP_URL]
-        : undefined,
+      authorizedParties,
       jwtKey: process.env.CLERK_JWT_KEY,
     });
 
@@ -50,6 +62,22 @@ async function getUserId(request: Request) {
   }
 }
 
+async function getUserId(request: Request) {
+  const token = bearerToken(request);
+  if (token?.startsWith("ocms_")) {
+    const [stored] = await createDb()
+      .select({ ownerId: cliTokens.ownerId })
+      .from(cliTokens)
+      .where(and(
+        eq(cliTokens.tokenHash, hashCliToken(token)),
+        gt(cliTokens.expiresAt, new Date()),
+      ))
+      .limit(1);
+    return stored?.ownerId ?? null;
+  }
+  return getClerkUserId(request);
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -58,8 +86,12 @@ function isUuid(value: string) {
   return uuidPattern.test(value);
 }
 
-function isUniqueViolation(error: unknown) {
-  return isRecord(error) && error.code === "23505";
+function isUniqueViolation(error: unknown): boolean {
+  if (!isRecord(error)) return false;
+  if (error.code === "23505") return true;
+  return [error.cause, error.sourceError, error.originalError].some((nested) => (
+    nested !== error && isUniqueViolation(nested)
+  ));
 }
 
 function slugify(value: string) {
@@ -92,11 +124,16 @@ async function projectSchema(
   db: ReturnType<typeof createDb>,
   projectId: string,
   ownerId: string,
+  environment: Environment,
 ): Promise<OpenCmsSchema> {
   const [stored] = await db
     .select()
     .from(contentSchemas)
-    .where(and(eq(contentSchemas.projectId, projectId), eq(contentSchemas.ownerId, ownerId)))
+    .where(and(
+      eq(contentSchemas.projectId, projectId),
+      eq(contentSchemas.ownerId, ownerId),
+      eq(contentSchemas.environment, environment),
+    ))
     .limit(1);
 
   if (stored) return stored.schema as unknown as OpenCmsSchema;
@@ -106,15 +143,19 @@ async function projectSchema(
     .values({
       projectId,
       ownerId,
+      environment,
       version: defaultSchema.version,
       schema: defaultSchema as unknown as JsonObject,
     })
-    .onConflictDoNothing({ target: contentSchemas.projectId });
+    .onConflictDoNothing({ target: [contentSchemas.projectId, contentSchemas.environment] });
 
   const [created] = await db
     .select()
     .from(contentSchemas)
-    .where(eq(contentSchemas.projectId, projectId))
+    .where(and(
+      eq(contentSchemas.projectId, projectId),
+      eq(contentSchemas.environment, environment),
+    ))
     .limit(1);
 
   return (created?.schema ?? defaultSchema) as unknown as OpenCmsSchema;
@@ -173,43 +214,6 @@ function normalizeContent(value: unknown): PageContent {
   return value as unknown as PageContent;
 }
 
-function fieldValueError(field: SchemaField, value: unknown, label: string): string | null {
-  if (value === undefined || value === null || value === "") return null;
-
-  const valid = field.type === "number"
-    ? typeof value === "number" && Number.isFinite(value)
-    : field.type === "boolean"
-      ? typeof value === "boolean"
-      : typeof value === "string";
-
-  return valid ? null : `${label} must be a ${field.type}.`;
-}
-
-function contentError(content: PageContent, schema: OpenCmsSchema, contentType: string): string | null {
-  const definition = schema.contentTypes[contentType];
-  if (!definition) return `Unknown content type: ${contentType}.`;
-
-  for (const [index, block] of content.blocks.entries()) {
-    if (!isRecord(block) || typeof block.id !== "string" || typeof block.type !== "string" || !isRecord(block.data)) {
-      return `Block ${index + 1} must define an id, type, and data object.`;
-    }
-    const blockDefinition = schema.blocks[block.type];
-    if (!blockDefinition) return `Unknown block type: ${block.type}.`;
-    if (definition.blocks && !definition.blocks.includes(block.type)) {
-      return `Block ${block.type} is not allowed in ${contentType}.`;
-    }
-    for (const [fieldName, field] of Object.entries(blockDefinition.fields)) {
-      const value = block.data[fieldName];
-      if (field.required && (value === undefined || value === "")) {
-        return `${blockDefinition.label} requires ${field.label ?? fieldName}.`;
-      }
-      const valueError = fieldValueError(field, value, field.label ?? fieldName);
-      if (valueError) return valueError;
-    }
-  }
-  return null;
-}
-
 function pageBody() {
   return t.Object({
     title: t.String({ minLength: 1, maxLength: 160 }),
@@ -233,7 +237,57 @@ function pageUpdateBody() {
 }
 
 const app = new Elysia({ prefix: "/api" })
+  .onError(({ code, error, set }) => {
+    if (code === "PARSE" || code === "VALIDATION") {
+      set.status = 400;
+      return { error: "Invalid request" };
+    }
+    if (code === "NOT_FOUND") {
+      set.status = 404;
+      return { error: "Not found" };
+    }
+
+    console.error("OpenCMS API request failed", { code, error });
+    set.status = 500;
+    return { error: "Internal Server Error" };
+  })
   .get("/health", () => ({ status: "ok" as const, service: "opencms-api" }))
+  .post("/cli/tokens", async ({ request, set }) => {
+    const userId = await getClerkUserId(request);
+    if (!userId) {
+      set.status = 401;
+      return { error: "Unauthorized" };
+    }
+
+    const token = createCliToken();
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const db = createDb();
+    await db.batch([
+      db.delete(cliTokens).where(and(
+        eq(cliTokens.ownerId, userId),
+        lt(cliTokens.expiresAt, new Date()),
+      )),
+      db.insert(cliTokens).values({
+        ownerId: userId,
+        tokenHash: hashCliToken(token),
+        expiresAt,
+      }),
+    ]);
+
+    set.status = 201;
+    return { token, expiresAt: expiresAt.toISOString() };
+  })
+  .delete("/cli/tokens/current", async ({ request, set }) => {
+    const token = bearerToken(request);
+    if (!token?.startsWith("ocms_")) {
+      set.status = 401;
+      return { error: "Unauthorized" };
+    }
+    await createDb()
+      .delete(cliTokens)
+      .where(eq(cliTokens.tokenHash, hashCliToken(token)));
+    return { revoked: true as const };
+  })
   .get("/projects", async ({ request, set }) => {
     const userId = await getUserId(request);
     if (!userId) {
@@ -256,13 +310,30 @@ const app = new Elysia({ prefix: "/api" })
         return { error: "Unauthorized" };
       }
 
+      const name = body.name.trim();
+      if (!name) {
+        set.status = 400;
+        return { error: "Project name is required." };
+      }
+
       const db = createDb();
+      const projectId = randomUUID();
       let project;
       try {
-        [project] = await db
-          .insert(projects)
-          .values({ ownerId: userId, name: body.name.trim(), slug: slugify(body.name) })
-          .returning();
+        const [createdProjects] = await db.batch([
+          db
+            .insert(projects)
+            .values({ id: projectId, ownerId: userId, name, slug: slugify(name) })
+            .returning(),
+          db.insert(contentSchemas).values(environments.map((environment) => ({
+            projectId,
+            ownerId: userId,
+            environment,
+            version: defaultSchema.version,
+            schema: defaultSchema as unknown as JsonObject,
+          }))),
+        ]);
+        [project] = createdProjects;
       } catch (error) {
         if (isUniqueViolation(error)) {
           set.status = 409;
@@ -271,24 +342,33 @@ const app = new Elysia({ prefix: "/api" })
         throw error;
       }
 
-      await db.insert(contentSchemas).values({
-        projectId: project.id,
-        ownerId: userId,
-        version: defaultSchema.version,
-        schema: defaultSchema as unknown as JsonObject,
-      });
+      if (!project) throw new Error("Project creation did not return a project.");
 
       set.status = 201;
       return project;
     },
     { body: t.Object({ name: t.String({ minLength: 1, maxLength: 80 }) }) },
   )
+  .delete("/projects/:projectId", async ({ request, params, set }) => {
+    const userId = await getUserId(request);
+    if (!userId) {
+      set.status = 401;
+      return { error: "Unauthorized" };
+    }
+    const { db, project } = await ownedProject(params.projectId, userId);
+    if (!project) {
+      set.status = 404;
+      return { error: "Project not found" };
+    }
+    await db.delete(projects).where(eq(projects.id, project.id));
+    return { deleted: true as const };
+  })
   .get("/delivery/projects/:projectId/pages", async ({ request, params, set }) => {
-    const db = createDb();
     if (!isUuid(params.projectId)) {
       set.status = 404;
       return { error: "Project not found" };
     }
+    const db = createDb();
     const [project] = await db
       .select({ id: projects.id })
       .from(projects)
@@ -299,6 +379,11 @@ const app = new Elysia({ prefix: "/api" })
       set.status = 404;
       return { error: "Project not found" };
     }
+
+    const environment = getEnvironment(request);
+    set.headers["Cache-Control"] = environment === "production"
+      ? "public, s-maxage=30, stale-while-revalidate=300"
+      : "no-store";
 
     return db
       .select({
@@ -317,7 +402,7 @@ const app = new Elysia({ prefix: "/api" })
       .from(documents)
       .where(and(
         eq(documents.projectId, project.id),
-        eq(documents.environment, getEnvironment(request)),
+        eq(documents.environment, environment),
         eq(documents.status, "published"),
       ))
       .orderBy(desc(documents.updatedAt));
@@ -333,7 +418,7 @@ const app = new Elysia({ prefix: "/api" })
       set.status = 404;
       return { error: "Project not found" };
     }
-    return projectSchema(db, project.id, userId);
+    return projectSchema(db, project.id, userId, getEnvironment(request));
   })
   .put(
     "/projects/:projectId/schema",
@@ -348,21 +433,49 @@ const app = new Elysia({ prefix: "/api" })
         set.status = 404;
         return { error: "Project not found" };
       }
+      const environment = getEnvironment(request);
+      if (environment !== "development") {
+        set.status = 403;
+        return { error: "Production schema is read-only. Deploy the development schema instead." };
+      }
       const error = schemaError(body);
       if (error) {
         set.status = 400;
         return { error };
+      }
+      const existingPages = await db
+        .select({
+          slug: documents.slug,
+          contentType: documents.contentType,
+          content: documents.content,
+        })
+        .from(documents)
+        .where(and(
+          eq(documents.projectId, project.id),
+          eq(documents.environment, "development"),
+        ));
+      const compatibilityError = validateSchemaCompatibility(
+        body as OpenCmsSchema,
+        existingPages.map((page) => ({
+          ...page,
+          content: page.content as unknown as PageContent,
+        })),
+      );
+      if (compatibilityError) {
+        set.status = 409;
+        return { error: `Schema is incompatible with existing content. ${compatibilityError}` };
       }
       const [updated] = await db
         .insert(contentSchemas)
         .values({
           projectId: project.id,
           ownerId: userId,
+          environment,
           version: 1,
           schema: body as JsonObject,
         })
         .onConflictDoUpdate({
-          target: contentSchemas.projectId,
+          target: [contentSchemas.projectId, contentSchemas.environment],
           set: { schema: body as JsonObject, version: 1, updatedAt: new Date() },
         })
         .returning();
@@ -433,6 +546,17 @@ const app = new Elysia({ prefix: "/api" })
         set.status = 404;
         return { error: "Project not found" };
       }
+      if ((body.environment ?? "development") !== "development") {
+        set.status = 403;
+        return { error: "Production content is read-only. Deploy development content instead." };
+      }
+
+      const title = body.title.trim();
+      const requestedSlug = body.slug.trim();
+      if (!title || !requestedSlug) {
+        set.status = 400;
+        return { error: "Page title and slug are required." };
+      }
 
       const contentType = body.contentType ?? "page";
       let content: PageContent;
@@ -442,26 +566,39 @@ const app = new Elysia({ prefix: "/api" })
         set.status = 400;
         return { error: error instanceof Error ? error.message : "Invalid content" };
       }
-      const error = contentError(content, await projectSchema(db, project.id, userId), contentType);
+      const error = validatePageContent(
+        content,
+        await projectSchema(db, project.id, userId, "development"),
+        contentType,
+      );
       if (error) {
         set.status = 400;
         return { error };
       }
 
-      const [page] = await db
-        .insert(documents)
-        .values({
-          projectId: project.id,
-          ownerId: userId,
-          environment: body.environment ?? "development",
-          contentType,
-          status: body.status ?? "draft",
-          title: body.title.trim(),
-          slug: slugify(body.slug),
-          content: content as unknown as JsonObject,
-          publishedAt: body.status === "published" ? new Date() : null,
-        })
-        .returning();
+      let page;
+      try {
+        [page] = await db
+          .insert(documents)
+          .values({
+            projectId: project.id,
+            ownerId: userId,
+            environment: body.environment ?? "development",
+            contentType,
+            status: body.status ?? "draft",
+            title,
+            slug: slugify(requestedSlug),
+            content: content as unknown as JsonObject,
+            publishedAt: body.status === "published" ? new Date() : null,
+          })
+          .returning();
+      } catch (error) {
+        if (isUniqueViolation(error)) {
+          set.status = 409;
+          return { error: "A page with that slug already exists in this environment." };
+        }
+        throw error;
+      }
 
       set.status = 201;
       return page;
@@ -486,6 +623,10 @@ const app = new Elysia({ prefix: "/api" })
         return { error: "Page not found" };
       }
       const environment = body.environment ?? getEnvironment(request);
+      if (environment !== "development") {
+        set.status = 403;
+        return { error: "Production content is read-only. Deploy development content instead." };
+      }
       const [existing] = await db
         .select()
         .from(documents)
@@ -499,6 +640,14 @@ const app = new Elysia({ prefix: "/api" })
         set.status = 404;
         return { error: "Page not found" };
       }
+      if (body.title !== undefined && !body.title.trim()) {
+        set.status = 400;
+        return { error: "Page title cannot be empty." };
+      }
+      if (body.slug !== undefined && !body.slug.trim()) {
+        set.status = 400;
+        return { error: "Page slug cannot be empty." };
+      }
 
       const contentType = body.contentType ?? existing.contentType;
       let content = existing.content as unknown as PageContent;
@@ -508,29 +657,42 @@ const app = new Elysia({ prefix: "/api" })
         set.status = 400;
         return { error: error instanceof Error ? error.message : "Invalid content" };
       }
-      const error = contentError(content, await projectSchema(db, project.id, userId), contentType);
+      const error = validatePageContent(
+        content,
+        await projectSchema(db, project.id, userId, environment),
+        contentType,
+      );
       if (error) {
         set.status = 400;
         return { error };
       }
 
-      const [updated] = await db
-        .update(documents)
-        .set({
-          ...(body.title === undefined ? {} : { title: body.title.trim() }),
-          ...(body.slug === undefined ? {} : { slug: slugify(body.slug) }),
-          ...(body.content === undefined ? {} : { content: content as unknown as JsonObject }),
-          ...(body.contentType === undefined ? {} : { contentType }),
-          ...(body.status === undefined
-            ? {}
-            : {
-                status: body.status as DocumentStatus,
-                publishedAt: body.status === "published" ? new Date() : null,
-              }),
-          updatedAt: new Date(),
-        })
-        .where(eq(documents.id, existing.id))
-        .returning();
+      let updated;
+      try {
+        [updated] = await db
+          .update(documents)
+          .set({
+            ...(body.title === undefined ? {} : { title: body.title.trim() }),
+            ...(body.slug === undefined ? {} : { slug: slugify(body.slug) }),
+            ...(body.content === undefined ? {} : { content: content as unknown as JsonObject }),
+            ...(body.contentType === undefined ? {} : { contentType }),
+            ...(body.status === undefined
+              ? {}
+              : {
+                  status: body.status as DocumentStatus,
+                  publishedAt: body.status === "published" ? new Date() : null,
+                }),
+            updatedAt: new Date(),
+          })
+          .where(eq(documents.id, existing.id))
+          .returning();
+      } catch (error) {
+        if (isUniqueViolation(error)) {
+          set.status = 409;
+          return { error: "A page with that slug already exists in this environment." };
+        }
+        throw error;
+      }
       return updated;
     },
     { body: pageUpdateBody() },
@@ -550,12 +712,17 @@ const app = new Elysia({ prefix: "/api" })
       set.status = 404;
       return { error: "Page not found" };
     }
+    const environment = getEnvironment(request);
+    if (environment !== "development") {
+      set.status = 403;
+      return { error: "Production content is read-only. Deploy development content instead." };
+    }
     const result = await db
       .delete(documents)
       .where(and(
         eq(documents.id, params.documentId),
         eq(documents.projectId, project.id),
-        eq(documents.environment, getEnvironment(request)),
+        eq(documents.environment, environment),
       ))
       .returning({ id: documents.id });
     if (!result.length) {
@@ -577,49 +744,7 @@ const app = new Elysia({ prefix: "/api" })
       return { error: "Project not found" };
     }
 
-    const developmentPages = await db
-      .select()
-      .from(documents)
-      .where(and(eq(documents.projectId, project.id), eq(documents.environment, "development")));
-
-    for (const page of developmentPages) {
-      await db
-        .insert(documents)
-        .values({
-          projectId: page.projectId,
-          ownerId: page.ownerId,
-          environment: "production",
-          contentType: page.contentType,
-          status: "published",
-          title: page.title,
-          slug: page.slug,
-          content: page.content,
-          publishedAt: new Date(),
-        })
-        .onConflictDoUpdate({
-          target: [documents.projectId, documents.environment, documents.slug],
-          set: {
-            contentType: page.contentType,
-            status: "published",
-            title: page.title,
-            content: page.content,
-            publishedAt: new Date(),
-            updatedAt: new Date(),
-          },
-        });
-    }
-
-    const [deployment] = await db
-      .insert(deployments)
-      .values({
-        projectId: project.id,
-        ownerId: userId,
-        sourceEnvironment: "development",
-        targetEnvironment: "production",
-      })
-      .returning();
-
-    return deployment;
+    return deployProject(db, project.id, userId);
   });
 
 export const GET = app.fetch;
