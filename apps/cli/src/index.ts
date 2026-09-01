@@ -17,8 +17,9 @@ import {
   type Project,
 } from "../../../packages/sdk/src/index";
 
-const dashboardUrl = process.env.OPENCMS_DASHBOARD_URL ?? "http://localhost:3000";
-const apiUrl = process.env.OPENCMS_API_URL ?? "http://localhost:3000";
+const hostedUrl = "https://web-eta-ten-16.vercel.app";
+const dashboardUrl = process.env.OPENCMS_DASHBOARD_URL ?? hostedUrl;
+const apiUrl = process.env.OPENCMS_API_URL ?? hostedUrl;
 const configRoot = process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config");
 const configPath = join(configRoot, "opencms", "config.json");
 

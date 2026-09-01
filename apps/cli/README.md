@@ -22,3 +22,5 @@ npx @maker-or/opencms deploy
 The generated `cms/schema.json` file defines the project's content types and allowed blocks. The CLI syncs it to the development environment when `dev` or `deploy` runs.
 
 The CLI stores its local login configuration in `~/.config/opencms/config.json` (or `$XDG_CONFIG_HOME/opencms/config.json` when configured).
+
+The CLI defaults to the hosted OpenCMS dashboard and API. Use `OPENCMS_DASHBOARD_URL` and `OPENCMS_API_URL` to target a local or self-hosted instance.

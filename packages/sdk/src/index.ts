@@ -54,7 +54,12 @@ export class OpenCmsApiError extends Error {
 }
 
 export function createSdk(options: OpenCmsSdkOptions = {}) {
-  const baseUrl = (options.baseUrl ?? "http://localhost:3000").replace(
+  const defaultBaseUrl = typeof window === "undefined" ? undefined : window.location.origin;
+  const configuredBaseUrl = options.baseUrl ?? defaultBaseUrl;
+  if (!configuredBaseUrl) {
+    throw new Error("baseUrl is required when using the OpenCMS SDK outside a browser.");
+  }
+  const baseUrl = configuredBaseUrl.replace(
     /\/$/,
     "",
   );

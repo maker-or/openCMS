@@ -166,13 +166,10 @@ function SettingsIcon(props: IconComponentProps) {
 export function SignInRequired() {
   return (
     <main className="dashboard-surface min-h-screen bg-surface-1 px-6">
-      <div className="flex justify-end py-6"><ThemeToggle /></div>
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <div className="max-w-md text-center">
-          <p className="text-sm uppercase tracking-[0.2em] text-muted-foreground">Private workspace</p>
-          <h1 className="mt-4 text-3xl font-semibold tracking-tight text-foreground">Sign in to manage this project.</h1>
-          <p className="mt-3 text-sm leading-6 text-muted-foreground">Your projects and content are scoped to your Clerk account.</p>
-          <SignInButton mode="modal"><Button className="mt-7">Sign in</Button></SignInButton>
+      <div className="flex min-h-[calc(100vh-5.5rem)] items-center justify-center pb-16">
+        <div className="w-full max-w-[450px] rounded-3xl border border-white/10 bg-surface-2 px-10 py-12 text-center shadow-[0_24px_60px_rgb(0_0_0/0.24)]">
+          <h1 className="mt-6 text-3xl font-semibold tracking-[-0.04em] text-foreground">Sign in to manage projects.</h1>
+          <SignInButton mode="modal"><Button className="mt-9 rounded-full px-6">Sign in</Button></SignInButton>
         </div>
       </div>
     </main>
